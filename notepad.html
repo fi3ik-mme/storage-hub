@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0078d4">
+  <title>Notepad</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="notepad-page">
+  <div id="notepad-app" class="notepad-shell">
+    <div class="notepad-window">
+      <div class="title-bar notepad-titlebar">
+        <div class="title-bar-left">
+          <span class="window-icon">📝</span>
+          <span id="notepad-title" class="notepad-title">Untitled - Notepad</span>
+        </div>
+        <div class="title-bar-controls">
+          <button type="button" class="title-btn" aria-label="Minimize" disabled>─</button>
+          <button type="button" class="title-btn" aria-label="Maximize" disabled>□</button>
+          <button type="button" class="title-btn close notepad-close" aria-label="Close">✕</button>
+        </div>
+      </div>
+      <div class="notepad-menubar">
+        <div class="notepad-menu">
+          <span class="notepad-menu-label">File</span>
+          <div class="notepad-menu-dropdown">
+            <button type="button" data-notepad-action="save">Save <span class="notepad-kbd">Ctrl+S</span></button>
+            <button type="button" data-notepad-action="save-as">Save As…</button>
+            <div class="notepad-menu-sep"></div>
+            <button type="button" data-notepad-action="print">Print…</button>
+            <div class="notepad-menu-sep"></div>
+            <button type="button" data-notepad-action="close">Exit <span class="notepad-kbd">Ctrl+W</span></button>
+          </div>
+        </div>
+        <div class="notepad-menu">
+          <span class="notepad-menu-label">Edit</span>
+          <div class="notepad-menu-dropdown">
+            <button type="button" data-notepad-action="find">Find… <span class="notepad-kbd">Ctrl+F</span></button>
+            <button type="button" data-notepad-action="replace">Replace… <span class="notepad-kbd">Ctrl+H</span></button>
+            <div class="notepad-menu-sep"></div>
+            <button type="button" data-notepad-action="select-all">Select All</button>
+            <button type="button" data-notepad-action="time-date">Time/Date</button>
+          </div>
+        </div>
+        <div class="notepad-menu">
+          <span class="notepad-menu-label">Format</span>
+          <div class="notepad-menu-dropdown">
+            <button type="button" id="notepad-wrap-toggle" data-notepad-action="wrap" class="active" aria-pressed="true">Word Wrap</button>
+          </div>
+        </div>
+        <div class="notepad-menu">
+          <span class="notepad-menu-label">Help</span>
+          <div class="notepad-menu-dropdown">
+            <button type="button" data-notepad-action="about">About Notepad</button>
+          </div>
+        </div>
+      </div>
+      <textarea id="notepad-editor" class="notepad-editor notepad-editor--wrap" spellcheck="false" wrap="soft"></textarea>
+      <div class="notepad-statusbar">
+        <span id="notepad-modified"></span>
+        <span id="notepad-status"></span>
+        <span id="notepad-position">Ln 1, Col 1</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/base-path.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="js/auth.js"></script>
+  <script src="js/drive.js"></script>
+  <script src="js/notepad.js"></script>
+  <script>Notepad.initStandalone();</script>
+  <script src="js/register-sw.js"></script>
+</body>
+</html>

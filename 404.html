@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0078d4">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>My Google</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Login screen -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-card">
+      <div class="login-logo">
+        <svg viewBox="0 0 48 48" width="64" height="64">
+          <path fill="#4285F4" d="M24 4L4 34h13l7-12 7 12h13L24 4z"/>
+          <path fill="#34A853" d="M4 34l6 10h28l6-10H4z"/>
+        </svg>
+      </div>
+      <h1>My Google</h1>
+      <p>Browse multiple Google Drive accounts in a Windows-style file manager.</p>
+      <button id="btn-sign-in" class="btn-primary">
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>
+          <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+          <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+          <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+        </svg>
+        Sign in with Google
+      </button>
+      <p id="login-error" class="login-error hidden"></p>
+      <p class="login-hint">Sign in once and allow Google Drive access when prompted.</p>
+    </div>
+  </div>
+
+  <!-- Explorer window -->
+  <div id="explorer" class="explorer hidden">
+    <div class="window">
+      <!-- Title bar -->
+      <div class="title-bar">
+        <div class="title-bar-left">
+          <span class="window-icon">📁</span>
+          <span class="window-title">My Google</span>
+        </div>
+        <div class="title-bar-controls">
+          <button class="title-btn" aria-label="Minimize">─</button>
+          <button class="title-btn" aria-label="Maximize">□</button>
+          <button class="title-btn close" id="btn-sign-out" aria-label="Sign out all" title="Sign out all users">✕</button>
+        </div>
+      </div>
+
+      <!-- Ribbon / toolbar -->
+      <div class="ribbon">
+        <div class="nav-buttons">
+          <button id="btn-sidebar-toggle" class="tool-btn mobile-only" type="button" title="Show navigation" aria-label="Show navigation">
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+          </button>
+          <button id="btn-back" class="tool-btn" title="Back" disabled>
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+          </button>
+          <button id="btn-forward" class="tool-btn" title="Forward" disabled>
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg>
+          </button>
+          <button id="btn-up" class="tool-btn" title="Up" disabled>
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/></svg>
+          </button>
+          <button id="btn-refresh" class="tool-btn" title="Refresh">
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+          </button>
+        </div>
+        <div class="address-bar">
+          <span class="address-icon">📁</span>
+          <div id="breadcrumbs" class="breadcrumbs"></div>
+          <button id="btn-copy-url" class="address-copy-btn" type="button" title="Copy link to this location">🔗</button>
+        </div>
+        <div class="view-toggle">
+          <button id="btn-view-grid" class="tool-btn active" title="Large icons">
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M4 4h4v4H4V4zm6 0h4v4h-4V4zm6 0h4v4h-4V4zM4 10h4v4H4v-4zm6 0h4v4h-4v-4zm6 0h4v4h-4v-4zM4 16h4v4H4v-4zm6 0h4v4h-4v-4zm6 0h4v4h-4v-4z"/></svg>
+          </button>
+          <button id="btn-view-list" class="tool-btn" title="Details">
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Main content -->
+      <div class="main-area">
+        <div id="sidebar-overlay" class="sidebar-overlay hidden" aria-hidden="true"></div>
+        <aside class="sidebar">
+          <div class="sidebar-section sidebar-tree-section">
+            <ul class="sidebar-tree">
+              <li id="tree-root-node" class="tree-root-node">
+                <div class="tree-row">
+                  <button type="button" class="tree-toggle" data-tree-toggle="root" aria-expanded="true" aria-label="Collapse"><span class="tree-chevron" aria-hidden="true"></span></button>
+                  <button id="nav-my-google" class="sidebar-item tree-root-item active" data-nav="my-google">
+                    <span class="sidebar-icon">🏠</span> My Google
+                  </button>
+                </div>
+                <ul id="sidebar-tree-users" class="tree-children tree-level-1"></ul>
+                <button id="btn-add-user" class="sidebar-add-btn tree-add-btn">
+                  <span class="sidebar-icon">＋</span> Add User Drive
+                </button>
+              </li>
+            </ul>
+          </div>
+
+          <div id="sidebar-user-footer" class="sidebar-user hidden">
+            <img id="user-avatar" class="user-avatar" alt="" />
+            <span id="user-name" class="user-name"></span>
+          </div>
+        </aside>
+
+        <main class="content">
+          <div id="loading" class="loading hidden">
+            <div class="spinner"></div>
+            <span>Loading...</span>
+          </div>
+          <div id="error" class="error-banner hidden"></div>
+          <div id="file-grid" class="file-grid"></div>
+          <div id="file-list" class="file-list hidden">
+            <div class="list-header">
+              <span class="col-name">Name</span>
+              <span class="col-modified">Date modified</span>
+              <span class="col-size">Size</span>
+              <span class="col-type">Type</span>
+            </div>
+            <div id="file-list-body" class="list-body"></div>
+          </div>
+          <div id="empty-state" class="empty-state hidden">
+            <span class="empty-icon">📂</span>
+            <p>This folder is empty</p>
+          </div>
+        </main>
+      </div>
+
+      <!-- Status bar -->
+      <div class="status-bar">
+        <span id="status-count">0 items</span>
+        <span id="status-selected"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="context-menu" class="context-menu hidden"></div>
+
+  <div id="props-dialog" class="props-dialog hidden">
+    <div class="props-card">
+      <div class="props-header">
+        <span class="props-title"></span>
+        <button type="button" class="props-close" aria-label="Close">✕</button>
+      </div>
+      <div class="props-body"></div>
+    </div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/base-path.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="js/auth.js"></script>
+  <script src="js/drive.js"></script>
+  <script src="js/router.js"></script>
+  <script src="js/notepad.js"></script>
+  <script src="js/contextmenu.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/register-sw.js"></script>
+</body>
+</html>
