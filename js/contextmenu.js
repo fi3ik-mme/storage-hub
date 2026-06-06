@@ -97,7 +97,7 @@ const ContextMenu = (() => {
   function buildRootMenuItems() {
     const userCount = Auth.getUsers().length;
     return [
-      { action: 'open', label: 'Open My Google', icon: '🏠' },
+      { action: 'open', label: `Open ${typeof SITE !== 'undefined' ? SITE.name : 'Mikus Drive'}`, icon: '🏠' },
       { sep: true },
       { action: 'add-user', label: 'Add User Drive', icon: '💾' },
       {
@@ -348,7 +348,7 @@ const ContextMenu = (() => {
     const users = Auth.getUsers();
     const active = Auth.getActiveUser();
     const rows = [
-      { section: 'My Google' },
+      { section: typeof SITE !== 'undefined' ? SITE.name : 'Mikus Drive' },
       ['Location', 'Root'],
       ['Mounted drives', String(users.length)],
       ['Active drive', active ? Auth.formatDisplayEmail(active.email) : '—'],
@@ -392,7 +392,7 @@ const ContextMenu = (() => {
   }
 
   async function showRootProperties() {
-    propsEl.querySelector('.props-title').textContent = 'My Google';
+    propsEl.querySelector('.props-title').textContent = typeof SITE !== 'undefined' ? SITE.name : 'Mikus Drive';
     propsEl.querySelector('.props-body').innerHTML = '<div class="props-loading">Loading metrics…</div>';
     propsEl.classList.remove('hidden');
 

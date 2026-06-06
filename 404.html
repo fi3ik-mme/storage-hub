@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#0078d4">
   <meta name="mobile-web-app-capable" content="yes">
-  <title>My Google</title>
+  <script src="js/site-config.js"></script>
+  <title>Mikus Drive</title>
   <link rel="icon" href="assets/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/logo-180.png">
@@ -17,9 +18,10 @@
   <div id="login-screen" class="login-screen">
     <div class="login-card">
       <div class="login-logo">
-        <img src="assets/logo.svg" width="72" height="72" alt="My Google logo">
+        <img src="assets/logo.svg" width="72" height="72" alt="Mikus Drive logo">
       </div>
-      <h1>My Google</h1>
+      <h1>Mikus Drive</h1>
+      <p class="login-brand">by Mykhailo Mikus</p>
       <p>Browse multiple Google Drive accounts in a Windows-style file manager.</p>
       <button id="btn-sign-in" class="btn-primary">
         <svg viewBox="0 0 24 24" width="20" height="20">
@@ -32,6 +34,11 @@
       </button>
       <p id="login-error" class="login-error hidden"></p>
       <p class="login-hint">Sign in once and allow Google Drive access when prompted.</p>
+      <p class="login-about">
+        <a href="https://github.com/MishaMikusEleks/mikus-drive">Mikus Drive</a> is an independent project by
+        <a href="https://github.com/MishaMikusEleks">Mykhailo Mikus</a>.
+        Not affiliated with Google LLC.
+      </p>
       <p class="login-footer">
         <a href="privacy.html">Privacy Policy</a>
         ·
@@ -47,7 +54,7 @@
       <div class="title-bar">
         <div class="title-bar-left">
           <img src="assets/logo.svg" class="window-logo" width="18" height="18" alt="">
-          <span class="window-title">My Google</span>
+          <span class="window-title">Mikus Drive</span>
         </div>
         <div class="title-bar-controls">
           <button class="title-btn" aria-label="Minimize">─</button>
@@ -99,8 +106,8 @@
               <li id="tree-root-node" class="tree-root-node">
                 <div class="tree-row">
                   <button type="button" class="tree-toggle" data-tree-toggle="root" aria-expanded="true" aria-label="Collapse"><span class="tree-chevron" aria-hidden="true"></span></button>
-                  <button id="nav-my-google" class="sidebar-item tree-root-item active" data-nav="my-google">
-                    <span class="sidebar-icon">🏠</span> My Google
+                  <button id="nav-home" class="sidebar-item tree-root-item active" data-nav="home">
+                    <span class="sidebar-icon">🏠</span> Mikus Drive
                   </button>
                 </div>
                 <ul id="sidebar-tree-users" class="tree-children tree-level-1"></ul>

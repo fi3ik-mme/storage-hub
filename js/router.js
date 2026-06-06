@@ -1,5 +1,5 @@
 const Router = (() => {
-  const ROOT_LABEL = 'My Google';
+  const ROOT_LABEL = typeof SITE !== 'undefined' ? SITE.name : 'Mikus Drive';
   let suppressRoute = false;
   let onNavigate = null;
   let basePath;
@@ -85,7 +85,7 @@ const Router = (() => {
     if (legacyUser) {
       return ['__legacy__', decodeURIComponent(legacyUser[1])];
     }
-    if (raw === 'my-google') return [];
+    if (raw === 'my-google' || raw === 'home') return [];
 
     const parts = raw.split('/').map((s) => decodeURIComponent(s));
     if (parts[0] === ROOT_LABEL) return parts.slice(1);

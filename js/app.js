@@ -1,16 +1,17 @@
 const App = (() => {
-  const MY_GOOGLE_ID = 'my-google';
+  const ROOT_ID = 'home';
+  const ROOT_NAME = typeof SITE !== 'undefined' ? SITE.name : 'Mikus Drive';
   const TREE_PAGE_SIZE = 10;
 
   const state = {
-    level: 'my-google',
+    level: 'home',
     currentUserId: null,
     currentFolderId: Drive.ROOT_ID,
     view: 'grid',
     section: 'my-drive',
     files: [],
-    breadcrumbs: [{ id: MY_GOOGLE_ID, name: 'My Google' }],
-    history: [{ level: 'my-google', userId: null, folderId: null, section: 'my-drive' }],
+    breadcrumbs: [{ id: ROOT_ID, name: ROOT_NAME }],
+    history: [{ level: 'home', userId: null, folderId: null, section: 'my-drive' }],
     historyIndex: 0,
     selectedId: null,
     expandedRoot: true,
@@ -72,7 +73,7 @@ const App = (() => {
       file,
       userId: file.userId || state.currentUserId,
       folderId: state.currentFolderId,
-      section: state.level === 'my-google' ? 'my-drive' : state.section,
+      section: state.level === 'home' ? 'my-drive' : state.section,
     };
   }
 
@@ -107,7 +108,7 @@ const App = (() => {
   }
 
   function getUrlSegments() {
-    if (state.level === 'my-google') return [];
+    if (state.level === 'home') return [];
 
     const segments = [];
     const user = Auth.getUsers().find((u) => u.id === state.currentUserId);
@@ -141,12 +142,12 @@ const App = (() => {
   }
 
   async function routeFromSegments(segments) {
-    if (!segments?.length) return { level: 'my-google' };
+    if (!segments?.length) return { level: 'home' };
 
     if (segments[0] === '__legacy__') {
       const [, userId, second] = segments;
       const user = Auth.getUsers().find((u) => u.id === userId);
-      if (!user) return { level: 'my-google' };
+      if (!user) return { level: 'home' };
       if (!second) {
         return { level: 'drive', userId: user.id, section: 'my-drive', folderId: Drive.ROOT_ID };
       }
@@ -158,7 +159,7 @@ const App = (() => {
 
     let parts = segments;
     if (parts[0] === Router.ROOT_LABEL) parts = parts.slice(1);
-    if (!parts.length) return { level: 'my-google' };
+    if (!parts.length) return { level: 'home' };
 
     const user = Auth.getUsers().find((u) => userLabel(u) === parts[0]);
     if (!user) return null;
@@ -199,8 +200,8 @@ const App = (() => {
   async function applyRoute(route, addToHistory = false) {
     if (!route) return;
 
-    if (route.level === 'my-google') {
-      state.level = 'my-google';
+    if (route.level === 'home') {
+      state.level = 'home';
       state.currentUserId = null;
       state.currentFolderId = Drive.ROOT_ID;
       state.section = 'my-drive';
@@ -213,7 +214,7 @@ const App = (() => {
 
     const user = Auth.getUsers().find((u) => u.id === route.userId);
     if (!user) {
-      await applyRoute({ level: 'my-google' }, false);
+      await applyRoute({ level: 'home' }, false);
       return;
     }
 
@@ -232,7 +233,7 @@ const App = (() => {
   async function applySegments(segments, addToHistory = false) {
     const route = await routeFromSegments(segments);
     if (!route) {
-      await applyRoute({ level: 'my-google' }, false);
+      await applyRoute({ level: 'home' }, false);
       return;
     }
     await applyRoute(route, addToHistory);
@@ -249,7 +250,7 @@ const App = (() => {
     $('#btn-back').disabled = state.historyIndex <= 0;
     $('#btn-forward').disabled = state.historyIndex >= state.history.length - 1;
 
-    $('#btn-up').disabled = state.level === 'my-google';
+    $('#btn-up').disabled = state.level === 'home';
   }
 
   function userLabel(user) {
@@ -317,7 +318,7 @@ const App = (() => {
       el.classList.toggle('tree-user-quota-reauth', !!quota?.needsReauth);
     });
 
-    if (state.level === 'my-google') {
+    if (state.level === 'home') {
       state.files = usersAsFileItems();
       renderCurrentView();
     }
@@ -340,7 +341,7 @@ const App = (() => {
     }
 
     renderSidebarTree();
-    if (state.level === 'my-google') {
+    if (state.level === 'home') {
       state.files = usersAsFileItems();
       renderCurrentView();
     }
@@ -375,7 +376,7 @@ const App = (() => {
   }
 
   function navigateToCrumb(crumb) {
-    if (crumb.id === MY_GOOGLE_ID) {
+    if (crumb.id === ROOT_ID) {
       navigateToMyGoogle();
     } else if (crumb.id.startsWith('user:')) {
       navigateToUser(crumb.id.slice(5), Drive.ROOT_ID);
@@ -521,8 +522,8 @@ const App = (() => {
   }
 
   function getActiveNavId() {
-    if (state.level === 'my-google') return 'my-google';
-    if (!state.currentUserId) return 'my-google';
+    if (state.level === 'home') return 'home';
+    if (!state.currentUserId) return 'home';
     if (state.section === 'my-drive') {
       if (state.currentFolderId !== Drive.ROOT_ID) {
         return `folder:${state.currentUserId}:${state.currentFolderId}`;
@@ -939,7 +940,7 @@ const App = (() => {
   async function buildBreadcrumbs(token, folderId, user) {
     if (state.section !== 'my-drive') {
       return dedupeBreadcrumbs([
-        { id: MY_GOOGLE_ID, name: 'My Google' },
+        { id: ROOT_ID, name: ROOT_NAME },
         { id: `user:${user.id}`, name: userLabel(user) },
         { id: state.section, name: SECTION_LABELS[state.section] || state.section },
       ]);
@@ -949,7 +950,7 @@ const App = (() => {
     const foldersAfterUser = folderId === Drive.ROOT_ID ? [] : drivePath.slice(1);
 
     return dedupeBreadcrumbs([
-      { id: MY_GOOGLE_ID, name: 'My Google' },
+      { id: ROOT_ID, name: ROOT_NAME },
       { id: `user:${user.id}`, name: userLabel(user) },
       ...foldersAfterUser,
     ]);
@@ -985,11 +986,11 @@ const App = (() => {
     updateActiveUserFooter();
 
     try {
-      if (state.level === 'my-google') {
+      if (state.level === 'home') {
         renderSidebarTree();
         state.files = usersAsFileItems();
-        state.breadcrumbs = [{ id: MY_GOOGLE_ID, name: 'My Google' }];
-        setSidebarActive('my-google');
+        state.breadcrumbs = [{ id: ROOT_ID, name: ROOT_NAME }];
+        setSidebarActive('home');
         refreshUserQuotas();
       } else {
         const userId = state.currentUserId || Auth.getActiveUser()?.id;
@@ -1040,7 +1041,7 @@ const App = (() => {
   }
 
   function navigateToMyGoogle() {
-    state.level = 'my-google';
+    state.level = 'home';
     state.currentUserId = null;
     state.currentFolderId = Drive.ROOT_ID;
     state.section = 'my-drive';
@@ -1084,7 +1085,7 @@ const App = (() => {
   }
 
   function navigateUp() {
-    if (state.level === 'my-google') return;
+    if (state.level === 'home') return;
 
     if (state.section !== 'my-drive') {
       state.section = 'my-drive';
@@ -1121,7 +1122,7 @@ const App = (() => {
 
   function handleTreeNav(nav) {
     ContextMenu.hide();
-    if (nav === 'my-google') {
+    if (nav === 'home') {
       navigateToMyGoogle();
       return;
     }
@@ -1231,7 +1232,7 @@ const App = (() => {
 
     $('.content').addEventListener('contextmenu', (e) => {
       if (e.target.closest('.file-item, .list-row')) return;
-      if (state.level === 'my-google') {
+      if (state.level === 'home') {
         ContextMenu.show(e, { type: 'root' });
         return;
       }

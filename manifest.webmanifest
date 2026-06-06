@@ -1,7 +1,7 @@
 {
-  "name": "My Google",
-  "short_name": "My Google",
-  "description": "Browse multiple Google Drive accounts in a file manager.",
+  "name": "Mikus Drive",
+  "short_name": "Mikus Drive",
+  "description": "Mikus Drive by Mykhailo Mikus — browse multiple Google Drive accounts in a file manager.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#0d2137",

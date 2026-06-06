@@ -1,4 +1,4 @@
-const CACHE_NAME = 'my-google-v1';
+const CACHE_NAME = 'mikus-drive-v1';
 
 const SHELL_ASSETS = [
   './',

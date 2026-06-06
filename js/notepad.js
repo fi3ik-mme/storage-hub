@@ -141,7 +141,7 @@ const Notepad = (() => {
     const legacyUserId = params.get('user');
     if (legacyUserId && !fileParam.includes('/')) {
       if (!Auth.getUsers().find((u) => u.id === legacyUserId)) {
-        app.showError('User not signed in. Open My Google and sign in first.');
+        app.showError(`User not signed in. Open ${typeof SITE !== 'undefined' ? SITE.name : 'Mikus Drive'} and sign in first.`);
         return;
       }
       try {
@@ -163,7 +163,7 @@ const Notepad = (() => {
     const segments = Drive.parseNotepadFilePath(fileParam);
     const user = Auth.getUsers().find((u) => Auth.formatDisplayEmail(u.email) === segments[0]);
     if (!user) {
-      app.showError('User not signed in. Open My Google and sign in first.');
+      app.showError(`User not signed in. Open ${typeof SITE !== 'undefined' ? SITE.name : 'Mikus Drive'} and sign in first.`);
       return;
     }
 
@@ -457,7 +457,7 @@ const Notepad = (() => {
         printDoc();
         break;
       case 'about':
-        alert('My Google Notepad\nA simple text editor for .txt and .json Drive files.');
+        alert(`${typeof SITE !== 'undefined' ? SITE.name : 'Mikus Drive'} Notepad\nA simple text editor for .txt and .json Drive files.`);
         break;
     }
   }

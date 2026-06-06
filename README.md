@@ -1,22 +1,24 @@
-# My Google
+# Mikus Drive
 
-A web file manager for one or more Google Drive accounts. Browse folders, copy files between users, edit `.txt`/`.json` in Notepad, and share deep links — works on desktop and mobile, and deploys to GitHub Pages.
+A web file manager for one or more Google Drive accounts, developed by [Mykhailo Mikus](https://github.com/MishaMikusEleks). Browse folders, copy files between users, edit `.txt`/`.json` in Notepad, and share deep links — works on desktop and mobile, and deploys to GitHub Pages.
 
-**Live demo:** [https://mishamikuseleks.github.io/my_google/](https://mishamikuseleks.github.io/my_google/)
+**Live demo:** [https://mishamikuseleks.github.io/mikus-drive/](https://mishamikuseleks.github.io/mikus-drive/)
 
 **Legal pages (for Google OAuth consent screen):**
 
 | Field | URL |
 |-------|-----|
-| Application home page | https://mishamikuseleks.github.io/my_google/ |
-| Privacy policy | https://mishamikuseleks.github.io/my_google/privacy.html |
-| Terms of Service | https://mishamikuseleks.github.io/my_google/terms.html |
+| Application home page | https://mishamikuseleks.github.io/mikus-drive/ |
+| Privacy policy | https://mishamikuseleks.github.io/mikus-drive/privacy.html |
+| Terms of Service | https://mishamikuseleks.github.io/mikus-drive/terms.html |
+
+> **Note:** Mikus Drive is an independent project and is not affiliated with Google LLC.
 
 ## Features
 
 - Multi-user Google sign-in (add several Drive accounts)
 - Windows-style explorer: tree, breadcrumbs, grid/list views, context menus
-- Path-based URLs (e.g. `/my_google/jane.doe/My%20Drive/Projects`)
+- Path-based URLs (e.g. `/mikus-drive/jane.doe/My%20Drive/Projects`)
 - Cross-user cut/copy/paste
 - Built-in Notepad for text files (opens in a new tab)
 - Mobile layout with slide-out navigation
@@ -30,11 +32,11 @@ See [Google OAuth setup for external users](#google-oauth-setup-for-external-use
 
 ### 2. Configure the app
 
-Edit `js/config.js`:
+Edit `js/config.js` (or `js/site-config.js` for branding and base path):
 
 ```js
 const CONFIG = {
-  BASE_PATH: null, // auto-detect; set to '/your-repo-name' on GitHub Pages if needed
+  BASE_PATH: '/mikus-drive', // must match your GitHub repo name
   CLIENT_ID: 'YOUR_CLIENT_ID.apps.googleusercontent.com',
   SCOPES: [
     'openid',
@@ -62,18 +64,26 @@ Open `http://localhost:8080` (or the port shown). Add that origin in Google Clou
 
 ## Deploy to GitHub Pages
 
-### 1. Push the repository
+### 1. Rename the repository (if migrating from `my_google`)
+
+In GitHub: **Settings → General → Repository name** → rename to `mikus-drive`.
+
+Then update your local remote:
+
+```bash
+git remote set-url origin https://github.com/MishaMikusEleks/mikus-drive.git
+```
+
+GitHub Pages will serve the app at `https://mishamikuseleks.github.io/mikus-drive/`.
+
+### 2. Push and enable Pages
 
 Enable **GitHub Pages** for the repo:
 
 - **Settings → Pages → Build and deployment → Source:** Deploy from branch
 - Branch: `main` (or `master`), folder: `/ (root)`
 
-Your app will be served at:
-
-`https://<github-username>.github.io/<repo-name>/`
-
-### 2. Files required for SPA routing
+### 3. Files required for SPA routing
 
 This repo includes:
 
@@ -84,29 +94,64 @@ This repo includes:
 | `.nojekyll` | Ensures GitHub Pages serves all paths as static files |
 | `js/base-path.js` | Detects `/repo-name` base path automatically |
 
-### 3. Base path
+### 4. Base path
 
-For a project site (`username.github.io/repo-name`), the app auto-detects the base path from `css/style.css`.
-
-If routing breaks, set an explicit base in `js/config.js`:
+For a project site (`username.github.io/repo-name`), set the base path in `js/site-config.js`:
 
 ```js
-BASE_PATH: '/my_google',  // must match your GitHub repo name
+basePath: '/mikus-drive',
 ```
 
-### 4. Update Google OAuth origins
+### 5. Update Google OAuth origins
 
 Add these **Authorized JavaScript origins** in Google Cloud Console:
 
-- `https://<github-username>.github.io`
-- `https://<github-username>.github.io/<repo-name>`
+- `https://mishamikuseleks.github.io`
+- `https://mishamikuseleks.github.io/mikus-drive`
 - `http://localhost:8080` (and any local port you use)
 
 No redirect URI is required for the Google Identity Services token client used by this app.
 
-### 5. Custom domain (optional)
+---
 
-If you use a custom domain for GitHub Pages, add `https://your-domain.com` as an authorized origin as well.
+## Google OAuth branding verification
+
+Google requires a unique app name and proof that you own the homepage domain.
+
+### App name
+
+Use **Mikus Drive** (not a generic name like "My Google"). The OAuth consent screen app name must match the branding shown on your homepage.
+
+### Verify homepage ownership
+
+1. Open [Google Search Console](https://search.google.com/search-console)
+2. Add property: `https://mishamikuseleks.github.io/mikus-drive/` (URL prefix)
+3. Choose **HTML tag** verification
+4. Copy the `content` value from the meta tag Google provides
+5. Paste it into `js/site-config.js`:
+
+   ```js
+   googleSiteVerification: 'YOUR_VERIFICATION_TOKEN',
+   ```
+
+6. Deploy to GitHub Pages and click **Verify** in Search Console
+
+Alternatively, verify the parent domain `https://mishamikuseleks.github.io` if you prefer domain-level verification.
+
+### OAuth consent screen URLs
+
+Update all URLs in **Google Cloud Console → APIs & Services → OAuth consent screen**:
+
+| Field | Value |
+|-------|-------|
+| App name | Mikus Drive |
+| User support email | your email |
+| App logo | upload `assets/logo-512.png` |
+| Application home page | https://mishamikuseleks.github.io/mikus-drive/ |
+| Privacy policy | https://mishamikuseleks.github.io/mikus-drive/privacy.html |
+| Terms of Service | https://mishamikuseleks.github.io/mikus-drive/terms.html |
+
+After updating, save and resubmit for verification.
 
 ---
 
@@ -117,7 +162,7 @@ Use this checklist so **anyone** (not just you) can sign in when you publish the
 ### Step 1 — Create a Google Cloud project
 
 1. Open [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a project (e.g. "My Google Drive Explorer")
+2. Create a project (e.g. "Mikus Drive")
 
 ### Step 2 — Enable Google Drive API
 
@@ -129,7 +174,7 @@ Use this checklist so **anyone** (not just you) can sign in when you publish the
 1. **APIs & Services → OAuth consent screen**
 2. User type: **External**
 3. Fill in:
-   - **App name** — e.g. "My Google"
+   - **App name** — **Mikus Drive**
    - **User support email** — your email
    - **Developer contact email** — your email
 4. **Scopes → Add or remove scopes**, add:
@@ -161,7 +206,7 @@ To allow **any Google user**:
    |-------------|----------------|
    | Local dev | `http://localhost:8080` |
    | GitHub Pages (user site) | `https://yourname.github.io` |
-   | GitHub Pages (project site) | `https://yourname.github.io/my_google` |
+   | GitHub Pages (project site) | `https://yourname.github.io/mikus-drive` |
    | Custom domain | `https://drive.example.com` |
 
 4. **Authorized redirect URIs** — leave empty (this app uses GIS `initTokenClient`, not redirect-based OAuth)
@@ -194,7 +239,8 @@ Users who signed in under an old readonly scope may be prompted to sign in again
 ├── manifest.webmanifest    # PWA manifest
 ├── css/style.css
 ├── js/
-│   ├── config.js           # Client ID, scopes, optional BASE_PATH
+│   ├── site-config.js      # App name, URLs, Search Console verification
+│   ├── config.js           # Client ID, scopes, BASE_PATH
 │   ├── base-path.js        # GitHub Pages base path detection
 │   ├── register-sw.js      # Service worker registration
 │   ├── auth.js             # Multi-user OAuth
@@ -210,9 +256,9 @@ Users who signed in under an old readonly scope may be prompted to sign in again
 
 | Page | Example |
 |------|---------|
-| Explorer root | `https://user.github.io/my_google/` |
-| Folder | `https://user.github.io/my_google/jane.doe/My%20Drive/Work` |
-| Notepad | `https://user.github.io/my_google/notepad.html?file=/jane.doe/My%20Drive/notes.txt` |
+| Explorer root | `https://user.github.io/mikus-drive/` |
+| Folder | `https://user.github.io/mikus-drive/jane.doe/My%20Drive/Work` |
+| Notepad | `https://user.github.io/mikus-drive/notepad.html?file=/jane.doe/My%20Drive/notes.txt` |
 
 ## Notes
 
