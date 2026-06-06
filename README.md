@@ -188,6 +188,26 @@ Use **Mikus Drive** (not a generic name like "My Google"). The OAuth consent scr
 
 The table above is the single source of truth for consent screen URLs. After updating, save and resubmit for verification.
 
+### Remove the “This app hasn’t been verified” warning
+
+Homepage / brand verification only proves you own the site. The scary consent screen appears because **Mikus Drive** uses the sensitive scope `https://www.googleapis.com/auth/drive` and Google has not yet approved the full **OAuth app verification**.
+
+Until full verification is approved, every user must click **Advanced → Go to Mikus Drive (unsafe)** on Google’s sign-in page. The login screen includes instructions for this.
+
+To remove the warning for all users:
+
+1. Open [OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent) → **Prepare for verification** (app must be **In production**).
+2. Provide **scope justification** — explain why Mikus Drive needs full Drive access (browse folders, create/edit/delete files, multi-account file manager).
+3. Upload a **demo video** (YouTube, unlisted is fine) showing:
+   - The app homepage and privacy policy link
+   - Clicking Sign in with Google and the consent screen
+   - Browsing Drive, opening a folder, and one file operation (e.g. create or edit a text file)
+4. Confirm all URLs match the live site and resubmit.
+
+Review usually takes several business days. While waiting, users can still sign in via **Advanced** as described on the login page.
+
+**Testing mode alternative:** If the app stays in **Testing**, add each user under **Test users** on the consent screen (max 100). Test users can sign in without publishing, but the unverified warning may still appear for sensitive scopes.
+
 ---
 
 ## Google OAuth setup for external users

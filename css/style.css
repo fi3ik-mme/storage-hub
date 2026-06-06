@@ -142,6 +142,46 @@ body {
   font-size: 0.78rem !important;
 }
 
+.login-verify-notice {
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: #f5f9ff;
+  border: 1px solid #cce4f7;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--win-text-muted);
+}
+
+.login-verify-notice summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--win-blue-dark);
+  list-style: none;
+}
+
+.login-verify-notice summary::-webkit-details-marker {
+  display: none;
+}
+
+.login-verify-notice summary::before {
+  content: '▸ ';
+}
+
+.login-verify-notice[open] summary::before {
+  content: '▾ ';
+}
+
+.login-verify-notice ol {
+  margin: 10px 0 0 18px;
+  padding: 0;
+}
+
+.login-verify-notice li + li {
+  margin-top: 6px;
+}
+
 /* ── Explorer window ── */
 
 .explorer {
