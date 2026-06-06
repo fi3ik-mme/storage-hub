@@ -116,31 +116,41 @@ No redirect URI is required for the Google Identity Services token client used b
 
 ## Google OAuth branding verification
 
-Google requires a unique app name and proof that you own the homepage domain.
+Google requires a unique app name and proof that you own the homepage ([requirements](https://support.google.com/cloud/answer/13807376)). The most common failure is Search Console ownership not linked to your Cloud project.
 
-### App name
+### Critical: use the same Google account everywhere
 
-Use **Mikus Drive** (not a generic name like "My Google"). The OAuth consent screen app name must match the branding shown on your homepage.
+The Google account that verifies the site in **Search Console** must also be **Owner** or **Editor** on your **Google Cloud** project (the one with your OAuth client). If you verified with a personal Gmail but your Cloud project uses a work account, Google will still report “website not registered to you.”
 
-### Verify homepage ownership
+Check Cloud project access: [Google Cloud Console → IAM](https://console.cloud.google.com/iam-admin/iam) — your verifying account must be listed as Owner or Editor.
 
-1. Open [Google Search Console](https://search.google.com/search-console)
-2. Add property: `https://mishamikuseleks.github.io/mikus-drive/` (URL prefix)
-3. Choose **HTML tag** verification
-4. Copy the `content` value from the meta tag Google provides
-5. Paste it into `js/site-config.js`:
+### Step 1 — Verify in Google Search Console
 
-   ```js
-   googleSiteVerification: 'YOUR_VERIFICATION_TOKEN',
+1. Open [Google Search Console](https://search.google.com/search-console) **while signed in with the same account as your Cloud project**.
+2. Click **Add property** → choose **URL prefix** (not “Domain”).
+3. Enter exactly: `https://mishamikuseleks.github.io/mikus-drive/`
+4. Pick a verification method:
+
+   **Option A — HTML tag (recommended)**  
+   Google gives you a meta tag like:
+   ```html
+   <meta name="google-site-verification" content="YOUR_TOKEN" />
    ```
+   - Copy the `content` value.
+   - Put it in `js/site-config.js` → `googleSiteVerification`.
+   - Also update the static meta tag inside `<head>` in `index.html`, `404.html`, `privacy.html`, and `terms.html` (Google’s crawler reads static HTML; it does not run JavaScript).
+   - Push to GitHub Pages, wait ~1 minute, then click **Verify** in Search Console.
 
-6. Deploy to GitHub Pages and click **Verify** in Search Console
+   **Option B — HTML file**  
+   Google gives you a file like `googleXXXXXXXX.html`. This repo already includes `google73af96c778f7385a.html` at the site root. After deploy it must be reachable at:
+   `https://mishamikuseleks.github.io/mikus-drive/google73af96c778f7385a.html`  
+   If Search Console gave you a *different* filename, replace the file in the repo root with the one Google provided.
 
-Alternatively, verify the parent domain `https://mishamikuseleks.github.io` if you prefer domain-level verification.
+5. Confirm Search Console shows **Ownership verified** for the URL prefix property.
 
-### OAuth consent screen URLs
+### Step 2 — Match OAuth consent screen URLs
 
-Update all URLs in **Google Cloud Console → APIs & Services → OAuth consent screen**:
+In [OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent), set:
 
 | Field | Value |
 |-------|-------|
@@ -151,7 +161,32 @@ Update all URLs in **Google Cloud Console → APIs & Services → OAuth consent 
 | Privacy policy | https://mishamikuseleks.github.io/mikus-drive/privacy.html |
 | Terms of Service | https://mishamikuseleks.github.io/mikus-drive/terms.html |
 
-After updating, save and resubmit for verification.
+Under **Authorized domains**, Google may list `github.io`. You cannot verify `github.io` itself — verify the **URL prefix** property above instead. Google’s OAuth check links your verified Search Console property to the homepage URL on the consent screen.
+
+### Step 3 — Resubmit verification
+
+After Search Console shows verified:
+
+1. Open the OAuth verification request in Cloud Console.
+2. Confirm the homepage URL is exactly `https://mishamikuseleks.github.io/mikus-drive/`.
+3. Resubmit for verification (or reply to Google’s email confirming ownership is verified).
+
+### If verification still fails
+
+GitHub Pages on `*.github.io` is a shared platform. If Google continues to reject it, the reliable fix is a **custom domain** you own (e.g. `mikusdrive.dev`):
+
+1. Buy a domain and add it in GitHub Pages → **Settings → Pages → Custom domain**.
+2. Verify that domain in Search Console (DNS TXT record).
+3. Update homepage, privacy, and terms URLs on the OAuth consent screen to use the custom domain.
+4. Add the custom domain origin to **Authorized JavaScript origins**.
+
+### App name
+
+Use **Mikus Drive** (not a generic name like "My Google"). The OAuth consent screen app name must match the branding shown on your homepage.
+
+### OAuth consent screen URLs (reference)
+
+The table above is the single source of truth for consent screen URLs. After updating, save and resubmit for verification.
 
 ---
 
