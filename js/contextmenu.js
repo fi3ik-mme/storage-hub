@@ -37,6 +37,7 @@ const ContextMenu = (() => {
   ];
 
   let menuEl = null;
+  let backdropEl = null;
   let propsEl = null;
   let clipboard = null;
   let context = null;
@@ -45,9 +46,13 @@ const ContextMenu = (() => {
   function init(handlers) {
     app = handlers;
     menuEl = document.getElementById('context-menu');
+    backdropEl = document.getElementById('context-menu-backdrop');
     propsEl = document.getElementById('props-dialog');
 
-    document.addEventListener('click', hide);
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('#context-menu') || e.target.closest('.item-more-btn')) return;
+      hide();
+    });
     document.addEventListener('contextmenu', (e) => {
       if (!e.target.closest('#explorer')) return;
       if (e.target.closest('#context-menu')) return;
@@ -58,7 +63,13 @@ const ContextMenu = (() => {
       if (e.key === 'Escape') hide();
     });
 
+    backdropEl?.addEventListener('click', hide);
+
     menuEl?.addEventListener('click', (e) => {
+      if (e.target.closest('[data-action="close-sheet"]')) {
+        hide();
+        return;
+      }
       const btn = e.target.closest('[data-action]');
       if (!btn || btn.disabled) return;
       e.stopPropagation();
@@ -73,6 +84,9 @@ const ContextMenu = (() => {
 
   function hide() {
     menuEl?.classList.add('hidden');
+    menuEl?.classList.remove('context-menu--sheet');
+    backdropEl?.classList.add('hidden');
+    document.body.classList.remove('ctx-open');
     context = null;
   }
 
@@ -238,36 +252,80 @@ const ContextMenu = (() => {
     return items;
   }
 
-  function renderMenu(x, y) {
-    const items = buildItems();
-    menuEl.innerHTML = items
+  function isMobileSheet() {
+    return window.matchMedia('(max-width: 768px)').matches;
+  }
+
+  function getMenuTitle(ctx = context) {
+    if (!ctx) return 'Actions';
+    if (ctx.type === 'root') return typeof SITE !== 'undefined' ? SITE.name : 'Mikus Drive';
+    if (ctx.type === 'empty') return 'Folder actions';
+    if (ctx.type === 'user' && ctx.user) return Auth.formatDisplayEmail(ctx.user.email);
+    if (ctx.file?.name) return ctx.file.name;
+    return 'Actions';
+  }
+
+  function renderMenuItemsHtml(items) {
+    return items
       .map((item) => {
         if (item.sep) return '<div class="ctx-sep"></div>';
         if (item.header) return `<div class="ctx-header">${escapeHtml(item.header)}</div>`;
-        const disabled = item.disabled ? ' disabled' : '';
-        const shortcut = item.shortcut ? `<span class="ctx-shortcut">${item.shortcut}</span>` : '';
         const urlAttr = item.url ? ` data-url="${escapeHtml(item.url)}"` : '';
         const fileTypeAttr = item.fileType ? ` data-file-type="${escapeHtml(item.fileType)}"` : '';
-        return `<button type="button" class="ctx-item${disabled}" data-action="${item.action}"${item.disabled ? ' disabled' : ''}${urlAttr}${fileTypeAttr}>
+        const shortcut = item.shortcut ? `<span class="ctx-shortcut">${item.shortcut}</span>` : '';
+        return `<button type="button" class="ctx-item${item.disabled ? ' disabled' : ''}" data-action="${item.action}"${item.disabled ? ' disabled' : ''}${urlAttr}${fileTypeAttr}>
           <span class="ctx-icon">${item.icon}</span>
           <span class="ctx-label">${escapeHtml(item.label)}</span>${shortcut}
         </button>`;
       })
       .join('');
+  }
 
+  function renderMenu(x, y) {
+    const items = buildItems();
+    const sheet = isMobileSheet();
+    const title = getMenuTitle();
+
+    if (sheet) {
+      menuEl.innerHTML = `
+        <div class="ctx-sheet-header">
+          <span class="ctx-sheet-title">${escapeHtml(title)}</span>
+          <button type="button" class="ctx-sheet-close" data-action="close-sheet" aria-label="Close">✕</button>
+        </div>
+        <div class="ctx-sheet-body">${renderMenuItemsHtml(items)}</div>
+      `;
+      menuEl.classList.add('context-menu--sheet');
+      menuEl.classList.remove('hidden');
+      menuEl.style.left = '';
+      menuEl.style.top = '';
+      backdropEl?.classList.remove('hidden');
+      document.body.classList.add('ctx-open');
+      return;
+    }
+
+    menuEl.innerHTML = renderMenuItemsHtml(items);
+    menuEl.classList.remove('context-menu--sheet');
     menuEl.classList.remove('hidden');
+    backdropEl?.classList.add('hidden');
+    document.body.classList.remove('ctx-open');
+
     const rect = menuEl.getBoundingClientRect();
     const maxX = window.innerWidth - rect.width - 8;
     const maxY = window.innerHeight - rect.height - 8;
-    menuEl.style.left = `${Math.min(x, maxX)}px`;
-    menuEl.style.top = `${Math.min(y, maxY)}px`;
+    menuEl.style.left = `${Math.min(x ?? 8, maxX)}px`;
+    menuEl.style.top = `${Math.min(y ?? 8, maxY)}px`;
   }
 
   function show(e, ctx) {
-    e.preventDefault();
-    e.stopPropagation();
+    if (e?.preventDefault) e.preventDefault();
+    if (e?.stopPropagation) e.stopPropagation();
     context = ctx;
-    renderMenu(e.clientX, e.clientY);
+    renderMenu(e?.clientX, e?.clientY);
+  }
+
+  function showContext(ctx) {
+    context = ctx;
+    renderMenu(null, null);
   }
 
   async function getToken(ctx) {
@@ -718,5 +776,5 @@ const ContextMenu = (() => {
     return executeAction(action);
   }
 
-  return { init, show, hide, getClipboard, runAction };
+  return { init, show, showContext, hide, getClipboard, runAction };
 })();

@@ -78,12 +78,110 @@ const App = (() => {
   }
 
   function attachFileContextMenu(el, file) {
+    const openMenu = () => {
+      selectFile(file.id);
+      ContextMenu.showContext(buildFileContext(file));
+    };
+
     el.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
       selectFile(file.id);
       ContextMenu.show(e, buildFileContext(file));
     });
+
+    attachLongPress(el, openMenu);
+
+    el.querySelector('.item-more-btn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openMenu();
+    });
+  }
+
+  function attachLongPress(el, callback) {
+    let pressTimer = null;
+    let longPressFired = false;
+    let startX = 0;
+    let startY = 0;
+
+    const clearPress = () => {
+      if (pressTimer) clearTimeout(pressTimer);
+      pressTimer = null;
+    };
+
+    el.addEventListener('touchstart', (e) => {
+      if (e.target.closest('.item-more-btn, .tree-item-more')) return;
+      longPressFired = false;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      pressTimer = setTimeout(() => {
+        longPressFired = true;
+        if (navigator.vibrate) navigator.vibrate(12);
+        callback();
+      }, 480);
+    }, { passive: true });
+
+    el.addEventListener('touchmove', (e) => {
+      const touch = e.touches[0];
+      if (Math.abs(touch.clientX - startX) > 12 || Math.abs(touch.clientY - startY) > 12) {
+        clearPress();
+      }
+    }, { passive: true });
+
+    el.addEventListener('touchend', clearPress, { passive: true });
+    el.addEventListener('touchcancel', clearPress, { passive: true });
+
+    el.addEventListener('click', (e) => {
+      if (!longPressFired) return;
+      e.preventDefault();
+      e.stopPropagation();
+      longPressFired = false;
+    }, true);
+  }
+
+  function createItemMoreButton(label) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'item-more-btn';
+    btn.setAttribute('aria-label', label || 'Actions');
+    btn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>';
+    return btn;
+  }
+
+  function addTreeMoreButton(row, getContext) {
+    if (!row || row.querySelector('.tree-item-more')) return;
+    const btn = createItemMoreButton('Actions');
+    btn.classList.add('tree-item-more');
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      ContextMenu.showContext(getContext());
+    });
+    row.appendChild(btn);
+    attachLongPress(row, () => ContextMenu.showContext(getContext()));
+  }
+
+  function getCurrentAreaContext() {
+    if (state.selectedId) {
+      const file = state.files.find((f) => f.id === state.selectedId);
+      if (file) return buildFileContext(file);
+    }
+    if (state.level === 'home') return { type: 'root' };
+    if (state.level === 'drive' && state.currentUserId) {
+      return {
+        type: 'empty',
+        userId: state.currentUserId,
+        folderId: state.currentFolderId,
+        section: state.section,
+      };
+    }
+    return null;
+  }
+
+  function openMobileAreaMenu() {
+    const ctx = getCurrentAreaContext();
+    if (ctx) ContextMenu.showContext(ctx);
   }
 
   function snapshot() {
@@ -429,6 +527,9 @@ const App = (() => {
         ? `<span class="file-quota">${escapeHtml(file.quotaLabel || '…')}</span>`
         : '';
       item.innerHTML = `
+        <button type="button" class="item-more-btn" aria-label="Actions for ${escapeHtml(file.name)}">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+        </button>
         <div class="file-icon">${renderFileIcon(file)}</div>
         <span class="file-name">${escapeHtml(file.name)}</span>
         ${quotaHtml}
@@ -451,11 +552,14 @@ const App = (() => {
       row.innerHTML = `
         <span class="col-name">
           <span class="list-icon">${renderFileIcon(file, 'file-icon-wrap--small')}</span>
-          <span>${escapeHtml(file.name)}</span>
+          <span class="list-name-text">${escapeHtml(file.name)}</span>
         </span>
         <span class="col-modified">${file.dateFormatted}</span>
         <span class="col-size">${file.sizeFormatted}</span>
         <span class="col-type">${file.typeName}</span>
+        <button type="button" class="item-more-btn" aria-label="Actions for ${escapeHtml(file.name)}">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+        </button>
       `;
       row.addEventListener('click', () => selectFile(file.id));
       row.addEventListener('dblclick', () => openFile(file));
@@ -693,6 +797,13 @@ const App = (() => {
 
         row.appendChild(toggle);
         row.appendChild(btn);
+        addTreeMoreButton(row, () => ({
+          type: 'folder',
+          file: { ...item, isFolder: true },
+          userId,
+          folderId: item.id,
+          section: 'my-drive',
+        }));
         li.appendChild(row);
 
         const childUl = document.createElement('ul');
@@ -720,6 +831,13 @@ const App = (() => {
         <span class="tree-file-label">${escapeHtml(item.name)}</span>
       `;
       row.appendChild(btn);
+      addTreeMoreButton(row, () => ({
+        type: 'file',
+        file: item,
+        userId,
+        folderId: item.parents?.[0] || Drive.ROOT_ID,
+        section: 'my-drive',
+      }));
       li.appendChild(row);
       container.appendChild(li);
     });
@@ -790,6 +908,7 @@ const App = (() => {
       userBtn.appendChild(info);
       row.appendChild(toggle);
       row.appendChild(userBtn);
+      addTreeMoreButton(row, () => ({ type: 'user', userId: user.id, user }));
 
       const children = document.createElement('ul');
       children.className = 'tree-children tree-level-2';
@@ -1229,9 +1348,15 @@ const App = (() => {
 
     $('#btn-view-grid').addEventListener('click', () => setView('grid'));
     $('#btn-view-list').addEventListener('click', () => setView('list'));
+    $('#btn-mobile-menu')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openMobileAreaMenu();
+    });
+
+    addTreeMoreButton($('#nav-home')?.closest('.tree-row'), () => ({ type: 'root' }));
 
     $('.content').addEventListener('contextmenu', (e) => {
-      if (e.target.closest('.file-item, .list-row')) return;
+      if (e.target.closest('.file-item, .list-row, .item-more-btn')) return;
       if (state.level === 'home') {
         ContextMenu.show(e, { type: 'root' });
         return;
@@ -1415,6 +1540,8 @@ const App = (() => {
     });
 
     bindEvents();
+
+    if (isMobileLayout()) state.view = 'list';
 
     if (CONFIG.CLIENT_ID === 'YOUR_CLIENT_ID.apps.googleusercontent.com') {
       $('#btn-sign-in').disabled = true;

@@ -753,6 +753,8 @@ body {
   user-select: none;
   text-align: center;
   border: 1px solid transparent;
+  position: relative;
+  -webkit-touch-callout: none;
 }
 
 .file-item:hover {
@@ -864,12 +866,13 @@ body {
 
 .list-row {
   display: grid;
-  grid-template-columns: 1fr 140px 90px 120px;
+  grid-template-columns: 1fr 140px 90px 120px auto;
   padding: 4px 16px;
   font-size: 0.82rem;
   cursor: pointer;
   align-items: center;
   border: 1px solid transparent;
+  -webkit-touch-callout: none;
 }
 
 .list-row:hover {
@@ -892,6 +895,10 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.list-name-text {
+  min-width: 0;
 }
 
 .list-icon {
@@ -997,6 +1004,107 @@ body {
   letter-spacing: 0.03em;
   text-transform: uppercase;
   color: var(--win-text-muted);
+}
+
+.context-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.context-menu--sheet {
+  left: 0 !important;
+  right: 0 !important;
+  top: auto !important;
+  bottom: 0;
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+  border-radius: 16px 16px 0 0;
+  padding: 0;
+  border: none;
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.22);
+  animation: ctx-sheet-in 0.22s ease-out;
+}
+
+@keyframes ctx-sheet-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.ctx-sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--win-border);
+  background: var(--sidebar-bg);
+}
+
+.ctx-sheet-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ctx-sheet-close {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  background: #e8e8e8;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.ctx-sheet-body {
+  max-height: min(60dvh, 420px);
+  overflow-y: auto;
+  padding: 4px 0 calc(8px + env(safe-area-inset-bottom, 0));
+  -webkit-overflow-scrolling: touch;
+}
+
+body.ctx-open {
+  overflow: hidden;
+}
+
+.item-more-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--win-text-muted);
+  cursor: pointer;
+}
+
+.item-more-btn:active,
+.item-more-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--win-blue);
+}
+
+.tree-item-more {
+  margin-left: auto;
+  width: 36px;
+  height: 36px;
+}
+
+.empty-hint {
+  margin-top: 8px;
+  font-size: 0.82rem;
+  color: var(--win-text-muted);
+  text-align: center;
+  max-width: 240px;
 }
 
 /* Notepad */
@@ -1513,7 +1621,18 @@ body.notepad-page {
   }
 
   .file-item {
-    padding: 8px 4px;
+    min-height: 108px;
+    padding: 28px 4px 8px;
+    position: relative;
+  }
+
+  .file-item .item-more-btn {
+    display: flex;
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 36px;
+    height: 36px;
   }
 
   .file-icon-wrap {
@@ -1523,12 +1642,23 @@ body.notepad-page {
 
   .file-name {
     font-size: 0.72rem;
+    line-height: 1.25;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   .list-header,
   .list-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr auto;
     font-size: 0.78rem;
+  }
+
+  .list-header .col-modified,
+  .list-header .col-size,
+  .list-header .col-type {
+    display: none;
   }
 
   .col-size,
@@ -1538,18 +1668,45 @@ body.notepad-page {
   }
 
   .list-row {
-    min-height: 44px;
+    min-height: 52px;
+    padding: 6px 4px 6px 8px;
+    gap: 4px;
+  }
+
+  .list-row .item-more-btn {
+    display: flex;
+  }
+
+  .list-row .col-name {
+    min-width: 0;
+  }
+
+  .tree-row {
+    padding-right: 2px;
+  }
+
+  .tree-row .tree-item-more {
+    display: flex;
+  }
+
+  .tree-row > .sidebar-item {
+    min-width: 0;
   }
 
   .context-menu {
+    z-index: 1001;
+  }
+
+  .context-menu:not(.context-menu--sheet) {
     max-width: calc(100vw - 16px);
     max-height: calc(100dvh - 16px);
     overflow-y: auto;
   }
 
-  .context-menu button {
-    min-height: 44px;
-    padding: 10px 14px;
+  .context-menu button,
+  .context-menu .ctx-item {
+    min-height: 48px;
+    padding: 12px 16px;
   }
 
   .props-dialog {
