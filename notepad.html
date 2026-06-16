@@ -6,18 +6,52 @@
   <meta name="theme-color" content="#0078d4">
   <meta name="google-site-verification" content="eNqApo7Us9h2GKVx8_t4RmmMv1CDldejNsnmMH7RjQ8">
   <script src="js/site-config.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/base-path.js"></script>
+  <script src="js/app-version.js"></script>
   <title>Notepad — Mikus Drive</title>
-  <link rel="icon" href="assets/favicon-32.png" sizes="32x32" type="image/png">
-  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="css/style.css">
+  <link id="notepad-favicon-32" rel="icon" href="assets/favicon-32.png" sizes="32x32" type="image/png">
+  <link id="notepad-favicon-svg" rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link id="notepad-manifest" rel="manifest" href="manifest.webmanifest">
+  <link id="notepad-styles" rel="stylesheet" href="css/style.css">
+  <script>
+    (function () {
+      const version = typeof APP_VERSION !== 'undefined' ? `?v=${APP_VERSION}` : '';
+      const base = typeof BasePath !== 'undefined' ? BasePath.get() : '';
+      const onBase =
+        base &&
+        (location.pathname === base || location.pathname.startsWith(`${base}/`));
+      const prefix = onBase ? `${base}/` : '';
+
+      const map = {
+        'notepad-styles': `css/style.css${version}`,
+        'notepad-favicon-32': 'assets/favicon-32.png',
+        'notepad-favicon-svg': 'assets/favicon.svg',
+        'notepad-manifest': 'manifest.webmanifest',
+      };
+      Object.entries(map).forEach(([id, path]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const href = el.getAttribute('href') || '';
+        if (href.startsWith('/') || /^https?:/i.test(href)) {
+          if (id === 'notepad-styles' && version && !href.includes('?v=')) {
+            el.href = href + version;
+          }
+          return;
+        }
+        el.href = (typeof BasePath !== 'undefined' ? BasePath.prefixRelativeAsset(path) : prefix + path);
+      });
+    })();
+  </script>
 </head>
 <body class="notepad-page">
   <div id="notepad-app" class="notepad-shell">
     <div class="notepad-window">
       <div class="title-bar notepad-titlebar">
         <div class="title-bar-left">
-          <span class="window-icon">📝</span>
+          <svg class="notepad-app-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path fill="currentColor" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 2l5 5h-5V4zM8 13h8v2H8v-2zm0 4h5v2H8v-2z"/>
+          </svg>
           <span id="notepad-title" class="notepad-title">Untitled - Notepad</span>
         </div>
         <div class="title-bar-controls">
@@ -61,7 +95,46 @@
           </div>
         </div>
       </div>
-      <textarea id="notepad-editor" class="notepad-editor notepad-editor--wrap" spellcheck="false" wrap="soft"></textarea>
+      <div class="notepad-toolbar">
+        <button type="button" class="notepad-tool-btn notepad-tool-btn--primary" data-notepad-action="save" title="Save">
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-9H5V5h10v5z"/></svg>
+          Save
+        </button>
+        <span class="notepad-toolbar-sep" aria-hidden="true"></span>
+        <button type="button" class="notepad-tool-btn" id="notepad-undo-btn" data-notepad-action="undo" title="Undo" disabled>Undo</button>
+        <button type="button" class="notepad-tool-btn" id="notepad-redo-btn" data-notepad-action="redo" title="Redo" disabled>Redo</button>
+        <span class="notepad-toolbar-sep" aria-hidden="true"></span>
+        <button type="button" class="notepad-tool-btn" data-notepad-action="find" title="Find">Find</button>
+        <button type="button" class="notepad-tool-btn" data-notepad-action="find-replace" title="Find and replace">Find &amp; Replace</button>
+      </div>
+      <div id="notepad-find-bar" class="notepad-find-bar hidden" role="search" aria-label="Find and replace">
+        <div class="notepad-find-row">
+          <label class="notepad-find-field">
+            <span class="notepad-find-label">Find</span>
+            <input type="text" id="notepad-find-input" class="notepad-find-input" autocomplete="off" spellcheck="false" aria-label="Find">
+          </label>
+          <label class="notepad-find-field notepad-find-field--replace">
+            <span class="notepad-find-label">Replace</span>
+            <input type="text" id="notepad-find-replace" class="notepad-find-input" autocomplete="off" spellcheck="false" aria-label="Replace with">
+          </label>
+        </div>
+        <div class="notepad-find-actions">
+          <button type="button" class="notepad-find-btn" data-find-action="prev" title="Find previous">◀</button>
+          <button type="button" class="notepad-find-btn" data-find-action="next" title="Find next">▶</button>
+          <button type="button" class="notepad-find-btn notepad-find-btn--replace" data-find-action="replace">Replace</button>
+          <button type="button" class="notepad-find-btn notepad-find-btn--replace" data-find-action="replace-all">Replace all</button>
+          <button type="button" class="notepad-find-btn notepad-find-btn--close" data-find-action="close" aria-label="Close find bar">✕</button>
+        </div>
+        <span id="notepad-find-status" class="notepad-find-status" aria-live="polite"></span>
+      </div>
+      <div id="notepad-banner" class="notepad-banner hidden" role="status"></div>
+      <div class="notepad-editor-area">
+        <div id="notepad-loading" class="notepad-loading hidden" aria-live="polite">
+          <div class="notepad-loading-spinner" aria-hidden="true"></div>
+          <span>Loading…</span>
+        </div>
+        <textarea id="notepad-editor" class="notepad-editor notepad-editor--wrap" spellcheck="false" wrap="soft" autocomplete="off" autocorrect="off" autocapitalize="off" aria-label="Document editor"></textarea>
+      </div>
       <div class="notepad-statusbar">
         <span id="notepad-modified"></span>
         <span id="notepad-status"></span>
@@ -70,12 +143,12 @@
     </div>
   </div>
 
-  <script src="js/site-config.js"></script>
-  <script src="js/config.js"></script>
-  <script src="js/base-path.js"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="js/auth.js"></script>
   <script src="js/drive.js"></script>
+  <script src="js/localdisk.js"></script>
+  <script src="js/githubdisk.js"></script>
+  <script src="js/dialog.js"></script>
   <script src="js/notepad.js"></script>
   <script>Notepad.initStandalone();</script>
   <script src="js/register-sw.js"></script>

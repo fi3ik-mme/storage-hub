@@ -18,6 +18,16 @@ const Drive = (() => {
     'application/x-zip-compressed': '📦',
   };
 
+  function markDriveError(error, status, message) {
+    error.status = status;
+    if (status === 403 && /insufficient.*scope/i.test(message)) {
+      error.code = 'INSUFFICIENT_SCOPES';
+    } else if (status === 403 || status === 404) {
+      error.code = 'NO_WRITE_ACCESS';
+    }
+    return error;
+  }
+
   async function apiRequest(path, token, options = {}) {
     const res = await fetch(`https://www.googleapis.com/drive/v3${path}`, {
       headers: { Authorization: `Bearer ${token}`, ...options.headers },
@@ -27,11 +37,7 @@ const Drive = (() => {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       const message = err.error?.message || `Drive API error (${res.status})`;
-      const error = new Error(message);
-      if (res.status === 403 && /insufficient.*scope/i.test(message)) {
-        error.code = 'INSUFFICIENT_SCOPES';
-      }
-      throw error;
+      throw markDriveError(new Error(message), res.status, message);
     }
     if (options.raw) return res;
     if (res.status === 204) return null;
@@ -104,11 +110,7 @@ const Drive = (() => {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       const message = err.error?.message || `Drive upload error (${res.status})`;
-      const error = new Error(message);
-      if (res.status === 403 && /insufficient.*scope/i.test(message)) {
-        error.code = 'INSUFFICIENT_SCOPES';
-      }
-      throw error;
+      throw markDriveError(new Error(message), res.status, message);
     }
     return res.json();
   }
@@ -251,10 +253,24 @@ const Drive = (() => {
     );
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error?.message || `Drive upload error (${res.status})`);
+      const message = err.error?.message || `Drive upload error (${res.status})`;
+      throw markDriveError(new Error(message), res.status, message);
     }
     const text = await res.text();
     return text ? JSON.parse(text) : null;
+  }
+
+  function canEditFile(meta) {
+    if (!meta) return false;
+    if (meta.capabilities && typeof meta.capabilities.canEdit === 'boolean') {
+      return meta.capabilities.canEdit;
+    }
+    return meta.ownedByMe !== false;
+  }
+
+  async function canWriteFile(token, fileId) {
+    const meta = await getFileMeta(token, fileId);
+    return canEditFile(meta);
   }
 
   function isEditableTextFile(file) {
@@ -275,7 +291,10 @@ const Drive = (() => {
   }
 
   async function getFileMeta(token, fileId) {
-    return apiRequest(`/files/${fileId}?fields=id,name,mimeType,webViewLink,parents`, token);
+    return apiRequest(
+      `/files/${fileId}?fields=id,name,mimeType,webViewLink,parents,capabilities,ownedByMe`,
+      token
+    );
   }
 
   function parseNotepadFilePath(raw) {
@@ -298,7 +317,7 @@ const Drive = (() => {
     }
 
     segments.push(file.name);
-    return `/${segments.map((s) => encodeURIComponent(s)).join('/')}`;
+    return `/${segments.join('/')}`;
   }
 
   async function resolveFileByPath(token, segments) {
@@ -703,6 +722,8 @@ const Drive = (() => {
     isEditableTextFile,
     isNotepadFile,
     getFileMeta,
+    canEditFile,
+    canWriteFile,
     parseNotepadFilePath,
     buildNotepadFilePath,
     resolveFileByPath,

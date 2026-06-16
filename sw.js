@@ -1,17 +1,26 @@
-const CACHE_NAME = 'mikus-drive-v1';
+importScripts('./js/app-version.js');
+
+const CACHE_NAME = `mikus-drive-${APP_VERSION}`;
 
 const SHELL_ASSETS = [
   './',
   './index.html',
   './notepad.html',
+  './github-oauth-callback.html',
   './404.html',
   './privacy.html',
   './terms.html',
   './css/style.css',
+  './js/app-version.js',
   './js/base-path.js',
   './js/config.js',
+  './js/site-config.js',
   './js/auth.js',
   './js/drive.js',
+  './js/localdisk.js',
+  './js/githubdisk.js',
+  './js/localuser.js',
+  './js/dialog.js',
   './js/router.js',
   './js/notepad.js',
   './js/contextmenu.js',
@@ -31,19 +40,7 @@ const SHELL_ASSETS = [
   './manifest.webmanifest',
 ];
 
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS)).then(() => self.skipWaiting())
-  );
-});
-
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    ).then(() => self.clients.claim())
-  );
-});
+const NETWORK_FIRST_PATHS = /\.(html?|css|js|webmanifest)$|\/$/;
 
 function isApiRequest(url) {
   return (
@@ -60,6 +57,65 @@ function shellPath(pathname) {
   return './index.html';
 }
 
+function isNetworkFirst(url) {
+  const path = url.pathname;
+  return NETWORK_FIRST_PATHS.test(path) || path.endsWith('/sw.js');
+}
+
+async function clearOldCaches() {
+  const keys = await caches.keys();
+  await Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)));
+}
+
+async function networkFirst(request) {
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const copy = response.clone();
+      caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+    }
+    return response;
+  } catch {
+    const cached = await caches.match(request);
+    if (cached) return cached;
+    throw new Error('Offline and no cache');
+  }
+}
+
+async function cacheFirst(request) {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+  const response = await fetch(request);
+  if (response.ok) {
+    const copy = response.clone();
+    caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+  }
+  return response;
+}
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(SHELL_ASSETS))
+      .then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(clearOldCaches().then(() => self.clients.claim()));
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+  if (event.data?.type === 'CLEAR_CACHES') {
+    event.waitUntil(
+      caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+    );
+  }
+});
+
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET') return;
@@ -71,10 +127,14 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(shellPath(url.pathname), copy));
-          return response;
+        .then(async (response) => {
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(shellPath(url.pathname), copy));
+            return response;
+          }
+          const cached = await caches.match(shellPath(url.pathname));
+          return cached || caches.match('./index.html');
         })
         .catch(async () => {
           const cached = await caches.match(shellPath(url.pathname));
@@ -84,15 +144,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request).then((response) => {
-        if (!response.ok) return response;
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-        return response;
-      });
-    })
-  );
+  if (isNetworkFirst(url)) {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+
+  event.respondWith(cacheFirst(request));
 });

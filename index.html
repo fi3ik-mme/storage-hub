@@ -7,12 +7,26 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="google-site-verification" content="eNqApo7Us9h2GKVx8_t4RmmMv1CDldejNsnmMH7RjQ8">
   <script src="js/site-config.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/base-path.js"></script>
+  <script src="js/app-version.js"></script>
   <title>Mikus Drive</title>
   <link rel="icon" href="assets/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/logo-180.png">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="css/style.css">
+  <script>
+    (function () {
+      if (typeof BasePath === 'undefined') return;
+      const version = typeof APP_VERSION !== 'undefined' ? `?v=${APP_VERSION}` : '';
+      document.querySelectorAll('link[href]').forEach((el) => {
+        const href = el.getAttribute('href');
+        if (!href || href.startsWith('/') || /^https?:/i.test(href)) return;
+        el.href = BasePath.prefixRelativeAsset(href) + (href.includes('style.css') ? version : '');
+      });
+    })();
+  </script>
 </head>
 <body>
   <!-- Login screen -->
@@ -125,15 +139,10 @@
                 </div>
                 <ul id="sidebar-tree-users" class="tree-children tree-level-1"></ul>
                 <button id="btn-add-user" class="sidebar-add-btn tree-add-btn">
-                  <span class="sidebar-icon">＋</span> Add User Drive
+                  <span class="sidebar-icon">＋</span> Add storage
                 </button>
               </li>
             </ul>
-          </div>
-
-          <div id="sidebar-user-footer" class="sidebar-user hidden">
-            <img id="user-avatar" class="user-avatar" alt="" />
-            <span id="user-name" class="user-name"></span>
           </div>
         </aside>
 
@@ -182,11 +191,13 @@
     </div>
   </div>
 
-  <script src="js/config.js"></script>
-  <script src="js/base-path.js"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="js/auth.js"></script>
   <script src="js/drive.js"></script>
+  <script src="js/localdisk.js"></script>
+  <script src="js/githubdisk.js"></script>
+  <script src="js/localuser.js"></script>
+  <script src="js/dialog.js"></script>
   <script src="js/router.js"></script>
   <script src="js/notepad.js"></script>
   <script src="js/contextmenu.js"></script>

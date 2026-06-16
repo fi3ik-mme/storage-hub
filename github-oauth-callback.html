@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GitHub Sign-in</title>
+</head>
+<body>
+  <script>
+    (function () {
+      const params = new URLSearchParams(location.search);
+      const payload = {
+        source: 'mikus-drive-github-oauth',
+        code: params.get('code'),
+        state: params.get('state'),
+        error: params.get('error'),
+        error_description: params.get('error_description'),
+      };
+      if (window.opener) {
+        window.opener.postMessage(payload, location.origin);
+      }
+      window.close();
+    })();
+  </script>
+</body>
+</html>

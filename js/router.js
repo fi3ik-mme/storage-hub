@@ -12,8 +12,8 @@ const Router = (() => {
       return basePath;
     }
 
-    if (typeof CONFIG !== 'undefined' && CONFIG.BASE_PATH != null && CONFIG.BASE_PATH !== '') {
-      basePath = String(CONFIG.BASE_PATH).replace(/\/$/, '');
+    if (typeof BasePath !== 'undefined') {
+      basePath = BasePath.get();
       return basePath;
     }
 

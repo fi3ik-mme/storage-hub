@@ -33,6 +33,15 @@ const App = (() => {
     { id: 'trash', icon: '🗑️', label: 'Recycle Bin' },
   ];
 
+  const LOCAL_DISK_SECTIONS = [
+    { id: 'my-drive', icon: '📁', label: 'My Drive' },
+    { id: 'trash', icon: '🗑️', label: 'Recycle Bin' },
+  ];
+
+  const GITHUB_DISK_SECTIONS = [
+    { id: 'my-drive', icon: '📁', label: 'My Drive' },
+  ];
+
   const SECTION_LABELS = {
     shared: 'Shared with me',
     starred: 'Starred',
@@ -67,7 +76,40 @@ const App = (() => {
     $('#status-selected').textContent = msg || '';
   }
 
+  function isCurrentLocalDrive() {
+    return LocalDisk.isLocalId(state.currentUserId);
+  }
+
+  function isCurrentGithubDrive() {
+    return GithubDisk.isGithubId(state.currentUserId);
+  }
+
+  function isLocalOrGithubDrive(id) {
+    return LocalDisk.isLocalId(id) || GithubDisk.isGithubId(id);
+  }
+
   function buildFileContext(file) {
+    if (file.isLocalDisk) {
+      return {
+        type: 'local-disk',
+        diskId: file.userId,
+        disk: LocalDisk.getDisk(file.userId),
+      };
+    }
+    if (file.isGithubDisk) {
+      return {
+        type: 'github-disk',
+        diskId: file.userId,
+        disk: GithubDisk.getDisk(file.userId),
+      };
+    }
+    if (file.isUserDrive) {
+      return {
+        type: 'user',
+        userId: file.userId,
+        user: Auth.getUsers().find((u) => u.id === file.userId),
+      };
+    }
     return {
       type: file.isFolder ? 'folder' : 'file',
       file,
@@ -209,6 +251,36 @@ const App = (() => {
     if (state.level === 'home') return [];
 
     const segments = [];
+    if (LocalDisk.isLocalId(state.currentUserId)) {
+      const disk = LocalDisk.getDisk(state.currentUserId);
+      if (!disk) return segments;
+      segments.push(disk.name);
+      if (state.section !== 'my-drive') {
+        segments.push(SECTION_LABELS[state.section] || state.section);
+        return segments;
+      }
+      segments.push('My Drive');
+      if (state.currentFolderId !== LocalDisk.ROOT_ID && state.breadcrumbs.length > 2) {
+        state.breadcrumbs.slice(2)
+          .filter((crumb) => crumb.id !== LocalDisk.ROOT_ID && crumb.name !== 'My Drive')
+          .forEach((crumb) => segments.push(crumb.name));
+      }
+      return segments;
+    }
+
+    if (GithubDisk.isGithubId(state.currentUserId)) {
+      const disk = GithubDisk.getDisk(state.currentUserId);
+      if (!disk) return segments;
+      segments.push(disk.name);
+      segments.push('My Drive');
+      if (state.currentFolderId !== GithubDisk.ROOT_ID && state.breadcrumbs.length > 2) {
+        state.breadcrumbs.slice(2)
+          .filter((crumb) => crumb.id !== GithubDisk.ROOT_ID && crumb.name !== 'My Drive')
+          .forEach((crumb) => segments.push(crumb.name));
+      }
+      return segments;
+    }
+
     const user = Auth.getUsers().find((u) => u.id === state.currentUserId);
     if (!user) return segments;
 
@@ -228,10 +300,10 @@ const App = (() => {
     return segments;
   }
 
-  async function resolveFolderPath(token, folderNames) {
-    let parentId = Drive.ROOT_ID;
+  async function resolveFolderPath(token, folderNames, rootId = Drive.ROOT_ID, listFn = Drive.listFiles) {
+    let parentId = rootId;
     for (const name of folderNames) {
-      const items = await Drive.listFiles(token, parentId);
+      const items = await listFn(token, parentId);
       const folder = items.find((f) => f.isFolder && f.name === name);
       if (!folder) throw new Error(`Folder not found: ${name}`);
       parentId = folder.id;
@@ -259,6 +331,78 @@ const App = (() => {
     if (parts[0] === Router.ROOT_LABEL) parts = parts.slice(1);
     if (!parts.length) return { level: 'home' };
 
+    const localDisk = LocalDisk.getDiskByName(parts[0]);
+    if (localDisk) {
+      if (parts.length === 1) {
+        return {
+          level: 'drive',
+          userId: localDisk.id,
+          section: 'my-drive',
+          folderId: LocalDisk.ROOT_ID,
+        };
+      }
+      const second = parts[1];
+      if (SECTION_BY_LABEL[second]) {
+        return {
+          level: 'drive',
+          userId: localDisk.id,
+          section: SECTION_BY_LABEL[second],
+          folderId: LocalDisk.ROOT_ID,
+        };
+      }
+      let folderNames = second === 'My Drive' ? parts.slice(2) : parts.slice(1);
+      if (second === 'My Drive' && folderNames[0] === 'My Drive') {
+        folderNames = folderNames.slice(1);
+      }
+      let folderId = LocalDisk.ROOT_ID;
+      if (folderNames.length > 0) {
+        folderId = await resolveFolderPath(
+          localDisk.id,
+          folderNames,
+          LocalDisk.ROOT_ID,
+          (diskId, parentId) => LocalDisk.listFiles(diskId, parentId)
+        );
+      }
+      return {
+        level: 'drive',
+        userId: localDisk.id,
+        section: 'my-drive',
+        folderId,
+      };
+    }
+
+    const githubDisk = GithubDisk.getDiskByName(parts[0]);
+    if (githubDisk) {
+      if (parts.length === 1) {
+        return {
+          level: 'drive',
+          userId: githubDisk.id,
+          section: 'my-drive',
+          folderId: GithubDisk.ROOT_ID,
+        };
+      }
+      const second = parts[1];
+      let folderNames = second === 'My Drive' ? parts.slice(2) : parts.slice(1);
+      if (second === 'My Drive' && folderNames[0] === 'My Drive') {
+        folderNames = folderNames.slice(1);
+      }
+      let folderId = GithubDisk.ROOT_ID;
+      if (folderNames.length > 0) {
+        folderId = await resolveFolderPath(
+          githubDisk.id,
+          folderNames,
+          GithubDisk.ROOT_ID,
+          (diskId, parentId) => GithubDisk.listFiles(diskId, parentId)
+        );
+      }
+      return {
+        level: 'drive',
+        userId: githubDisk.id,
+        section: 'my-drive',
+        folderId,
+      };
+    }
+
     const user = Auth.getUsers().find((u) => userLabel(u) === parts[0]);
     if (!user) return null;
 
@@ -283,8 +427,10 @@ const App = (() => {
     let folderId = Drive.ROOT_ID;
 
     if (folderNames.length > 0) {
-      const token = await Auth.ensureValidToken(user.id);
-      folderId = await resolveFolderPath(token, folderNames);
+      const token = await Auth.tryGetValidToken(user.id);
+      if (token) {
+        folderId = await resolveFolderPath(token, folderNames);
+      }
     }
 
     return {
@@ -310,7 +456,13 @@ const App = (() => {
       return;
     }
 
-    const user = Auth.getUsers().find((u) => u.id === route.userId);
+    const isLocal = LocalDisk.isLocalId(route.userId);
+    const isGithub = GithubDisk.isGithubId(route.userId);
+    const user = isLocal
+      ? LocalDisk.getDisk(route.userId)
+      : isGithub
+        ? GithubDisk.getDisk(route.userId)
+        : Auth.getUsers().find((u) => u.id === route.userId);
     if (!user) {
       await applyRoute({ level: 'home' }, false);
       return;
@@ -318,11 +470,11 @@ const App = (() => {
 
     state.level = 'drive';
     state.currentUserId = route.userId;
-    state.currentFolderId = route.folderId || Drive.ROOT_ID;
+    state.currentFolderId = route.folderId || (isLocal ? LocalDisk.ROOT_ID : isGithub ? GithubDisk.ROOT_ID : Drive.ROOT_ID);
     state.section = route.section || 'my-drive';
     state.expandedUsers.clear();
     state.expandedUsers.add(route.userId);
-    Auth.setActiveUser(route.userId);
+    if (!isLocal && !isGithub) Auth.setActiveUser(route.userId);
     if (addToHistory) pushHistory();
     else resetHistoryToCurrent();
     await loadCurrentLocation();
@@ -340,7 +492,8 @@ const App = (() => {
   function restoreHistory(entry) {
     state.level = entry.level;
     state.currentUserId = entry.userId;
-    state.currentFolderId = entry.folderId || Drive.ROOT_ID;
+    state.currentFolderId = entry.folderId
+      || (LocalDisk.isLocalId(entry.userId) ? LocalDisk.ROOT_ID : GithubDisk.isGithubId(entry.userId) ? GithubDisk.ROOT_ID : Drive.ROOT_ID);
     state.section = entry.section;
   }
 
@@ -378,19 +531,64 @@ const App = (() => {
     }));
   }
 
+  function localDisksAsFileItems() {
+    return LocalDisk.getDisks().map((disk) => ({
+      id: `local:${disk.id}`,
+      name: disk.name,
+      isFolder: true,
+      isLocalDisk: true,
+      userId: disk.id,
+      quotaLabel: getQuotaShort(disk.id),
+      typeName: 'Local Storage',
+      sizeFormatted: getQuotaShort(disk.id),
+      dateFormatted: '—',
+    }));
+  }
+
+  function githubDisksAsFileItems() {
+    return GithubDisk.getDisks().map((disk) => ({
+      id: `github:${disk.id}`,
+      name: disk.name,
+      isFolder: true,
+      isGithubDisk: true,
+      userId: disk.id,
+      picture: disk.accountAvatar,
+      quotaLabel: getQuotaShort(disk.id),
+      typeName: 'GitHub Repo',
+      sizeFormatted: getQuotaShort(disk.id),
+      dateFormatted: '—',
+    }));
+  }
+
+  function homeDriveItems() {
+    return [...usersAsFileItems(), ...localDisksAsFileItems(), ...githubDisksAsFileItems()];
+  }
+
   function isScopeError(message) {
     return /insufficient.*scope/i.test(message || '');
   }
 
   async function refreshUserQuotas(preloadedTokens = {}) {
     const users = Auth.getUsers();
-    await Promise.all(
-      users.map(async (user) => {
+    const localDisks = LocalDisk.getDisks();
+    const githubDisks = GithubDisk.getDisks();
+    await Promise.all([
+      ...users.map(async (user) => {
         try {
           if (user.scopes && user.scopes !== CONFIG.SCOPES) {
             throw Object.assign(new Error('Scopes outdated'), { code: 'INSUFFICIENT_SCOPES' });
           }
-          const token = preloadedTokens[user.id] || await Auth.ensureValidToken(user.id);
+          const token = preloadedTokens[user.id] || await Auth.tryGetValidToken(user.id);
+          if (!token) {
+            const needsReauth = !Auth.isTokenFresh(user)
+              || (user.scopes && user.scopes !== CONFIG.SCOPES);
+            state.userQuotas[user.id] = {
+              label: needsReauth ? 'Re-login for storage' : 'Storage unavailable',
+              shortLabel: '—',
+              needsReauth,
+            };
+            return;
+          }
           state.userQuotas[user.id] = await Drive.getStorageQuota(token);
         } catch (err) {
           if (err.code === 'INSUFFICIENT_SCOPES' || isScopeError(err.message)) {
@@ -406,8 +604,28 @@ const App = (() => {
             };
           }
         }
-      })
-    );
+      }),
+      ...localDisks.map(async (disk) => {
+        try {
+          state.userQuotas[disk.id] = await LocalDisk.getStorageQuota(disk.id);
+        } catch {
+          state.userQuotas[disk.id] = {
+            label: 'Storage unavailable',
+            shortLabel: '—',
+          };
+        }
+      }),
+      ...githubDisks.map(async (disk) => {
+        try {
+          state.userQuotas[disk.id] = await GithubDisk.getStorageQuota(disk.id);
+        } catch {
+          state.userQuotas[disk.id] = {
+            label: 'Storage unavailable',
+            shortLabel: '—',
+          };
+        }
+      }),
+    ]);
 
     document.querySelectorAll('.tree-user-quota').forEach((el) => {
       const userId = el.dataset.userId;
@@ -417,9 +635,67 @@ const App = (() => {
     });
 
     if (state.level === 'home') {
-      state.files = usersAsFileItems();
+      state.files = homeDriveItems();
       renderCurrentView();
     }
+  }
+
+  async function ejectLocalDisk(diskId) {
+    await LocalDisk.removeDisk(diskId);
+    delete state.userQuotas[diskId];
+    clearTreeCache(diskId);
+    state.expandedUsers.delete(diskId);
+
+    if (state.currentUserId === diskId) {
+      state.currentUserId = null;
+      navigateToMyGoogle();
+      showExplorer();
+      return;
+    }
+
+    renderSidebarTree();
+    if (state.level === 'home') {
+      state.files = homeDriveItems();
+      renderCurrentView();
+    }
+  }
+
+  async function ejectGithubDisk(diskId) {
+    await GithubDisk.removeDisk(diskId);
+    delete state.userQuotas[diskId];
+    clearTreeCache(diskId);
+    state.expandedUsers.delete(diskId);
+
+    if (state.currentUserId === diskId) {
+      state.currentUserId = null;
+      navigateToMyGoogle();
+      showExplorer();
+      return;
+    }
+
+    renderSidebarTree();
+    if (state.level === 'home') {
+      state.files = homeDriveItems();
+      renderCurrentView();
+    }
+  }
+
+  async function ejectAllDrives() {
+    const localIds = LocalDisk.getDisks().map((d) => d.id);
+    const githubIds = GithubDisk.getDisks().map((d) => d.id);
+    for (const diskId of localIds) {
+      await LocalDisk.removeDisk(diskId);
+      delete state.userQuotas[diskId];
+      clearTreeCache(diskId);
+    }
+    for (const diskId of githubIds) {
+      await GithubDisk.removeDisk(diskId);
+      delete state.userQuotas[diskId];
+      clearTreeCache(diskId);
+    }
+    Auth.signOutAll();
+    navigateToMyGoogle();
+    showExplorer();
   }
 
   function signOutUser(userId) {
@@ -430,24 +706,37 @@ const App = (() => {
 
     if (state.currentUserId === userId) {
       state.currentUserId = null;
-      if (Auth.hasUsers()) {
-        navigateToMyGoogle();
-      } else {
-        showLogin();
-      }
+      navigateToMyGoogle();
+      showExplorer();
       return;
     }
 
     renderSidebarTree();
     if (state.level === 'home') {
-      state.files = usersAsFileItems();
+      state.files = homeDriveItems();
       renderCurrentView();
     }
   }
 
   function renderUserAvatar(picture, className) {
     const src = escapeHtml(Auth.getAvatarUrl(picture));
-    return `<img src="${src}" alt="" class="${className}" onerror="this.onerror=null;this.src='${Auth.DEFAULT_AVATAR}'" />`;
+    const cls = escapeHtml(`${className} avatar-img`.trim());
+    return `<img src="${src}" alt="" class="${cls}" loading="lazy" />`;
+  }
+
+  function renderLocalStorageIcon(sizeClass = '') {
+    const size = sizeClass === 'user-drive-avatar' ? 48
+      : sizeClass === 'file-icon-wrap--small' ? 20
+        : sizeClass === 'file-icon-wrap--tiny' ? 18
+          : sizeClass ? 40 : 22;
+    const cls = `local-storage-icon ${sizeClass}`.trim();
+    return `<svg class="${cls}" viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">
+      <path fill="currentColor" d="M20 2H4c-1 0-2 .9-2 2v3.01c0 .72.43 1.34 1 1.62V20c0 1.1 1.1 2 2 2h12c1.1 0 2-.9 2-2V8.63c.57-.28 1-.9 1-1.62V4c0-1.1-1-2-2-2zm-5 14H9v-2h6v2zm5-6H4V5h16v5z"/>
+    </svg>`;
+  }
+
+  function renderGoogleDriveIcon(user, className = 'user-drive-avatar') {
+    return renderUserAvatar(user?.picture, className);
   }
 
   function renderBreadcrumbs() {
@@ -476,10 +765,20 @@ const App = (() => {
   function navigateToCrumb(crumb) {
     if (crumb.id === ROOT_ID) {
       navigateToMyGoogle();
+    } else if (LocalDisk.getDisk(crumb.id)) {
+      navigateToLocalDisk(crumb.id, LocalDisk.ROOT_ID);
+    } else if (GithubDisk.getDisk(crumb.id)) {
+      navigateToGithubDisk(crumb.id, GithubDisk.ROOT_ID);
     } else if (crumb.id.startsWith('user:')) {
       navigateToUser(crumb.id.slice(5), Drive.ROOT_ID);
-    } else if (crumb.id === Drive.ROOT_ID) {
-      navigateToUser(state.currentUserId, Drive.ROOT_ID);
+    } else if (crumb.id === Drive.ROOT_ID || crumb.id === LocalDisk.ROOT_ID || crumb.id === GithubDisk.ROOT_ID) {
+      if (LocalDisk.isLocalId(state.currentUserId)) {
+        navigateToLocalDisk(state.currentUserId, LocalDisk.ROOT_ID);
+      } else if (GithubDisk.isGithubId(state.currentUserId)) {
+        navigateToGithubDisk(state.currentUserId, GithubDisk.ROOT_ID);
+      } else {
+        navigateToUser(state.currentUserId, Drive.ROOT_ID);
+      }
     } else if (['shared', 'starred', 'recent', 'trash'].includes(crumb.id)) {
       state.level = 'drive';
       state.section = crumb.id;
@@ -497,7 +796,14 @@ const App = (() => {
 
   function renderFileIcon(file, sizeClass = '') {
     if (file.isUserDrive) {
-      return renderUserAvatar(file.picture, 'user-drive-avatar');
+      const user = Auth.getUsers().find((u) => u.id === file.userId);
+      return renderGoogleDriveIcon(user || { picture: file.picture }, 'user-drive-avatar');
+    }
+    if (file.isLocalDisk) {
+      return renderLocalStorageIcon(sizeClass || 'user-drive-avatar');
+    }
+    if (file.isGithubDisk) {
+      return renderUserAvatar(file.picture || GithubDisk.getDisk(file.userId)?.accountAvatar, 'user-drive-avatar');
     }
 
     const fallback = getFileTypeIcon(file);
@@ -523,7 +829,7 @@ const App = (() => {
       const item = document.createElement('div');
       item.className = 'file-item' + (file.id === state.selectedId ? ' selected' : '');
       item.dataset.id = file.id;
-      const quotaHtml = file.isUserDrive
+      const quotaHtml = (file.isUserDrive || file.isLocalDisk)
         ? `<span class="file-quota">${escapeHtml(file.quotaLabel || '…')}</span>`
         : '';
       item.innerHTML = `
@@ -537,8 +843,10 @@ const App = (() => {
       item.addEventListener('click', () => selectFile(file.id));
       item.addEventListener('dblclick', () => openFile(file));
       attachFileContextMenu(item, file);
+      bindDragDropForWorkspaceItem(item, file);
       grid.appendChild(item);
     });
+    Auth.applyAvatarFallbacks(grid);
   }
 
   function renderList() {
@@ -564,8 +872,10 @@ const App = (() => {
       row.addEventListener('click', () => selectFile(file.id));
       row.addEventListener('dblclick', () => openFile(file));
       attachFileContextMenu(row, file);
+      bindDragDropForWorkspaceItem(row, file);
       body.appendChild(row);
     });
+    Auth.applyAvatarFallbacks(body);
   }
 
   function escapeHtml(str) {
@@ -581,13 +891,51 @@ const App = (() => {
     $('#status-selected').textContent = file ? file.name : '';
   }
 
-  function openFile(file) {
+  async function downloadLocalFile(file) {
+    const blob = await LocalDisk.downloadFile(state.currentUserId, file.id);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name;
+    a.click();
+    URL.revokeObjectURL(url);
+    showStatus(`Downloading "${file.name}"`);
+  }
+
+  function openFile(file, userId = state.currentUserId, options = {}) {
     if (file.isUserDrive) {
       navigateToUser(file.userId, Drive.ROOT_ID);
+    } else if (file.isLocalDisk) {
+      navigateToLocalDisk(file.userId, LocalDisk.ROOT_ID);
+    } else if (file.isGithubDisk) {
+      navigateToGithubDisk(file.userId, GithubDisk.ROOT_ID);
     } else if (file.isFolder && state.section !== 'trash') {
       navigateToFolder(file.id);
-    } else if (Drive.isNotepadFile(file) && state.section === 'my-drive' && state.currentUserId) {
-      Notepad.openInTab(file, state.currentUserId).catch(showError);
+    } else if (
+      userId
+      && (
+        Drive.isNotepadFile(file)
+        || (LocalDisk.isLocalId(userId) && LocalDisk.isNotepadFile(file))
+        || (GithubDisk.isGithubId(userId) && GithubDisk.isNotepadFile(file))
+      )
+      && (options.fromTree || state.section === 'my-drive')
+    ) {
+      Notepad.openInTab(file, userId).catch(showError);
+    } else if (userId && LocalDisk.isLocalId(userId) && !file.isFolder) {
+      const prevUserId = state.currentUserId;
+      state.currentUserId = userId;
+      downloadLocalFile(file).catch(showError).finally(() => {
+        state.currentUserId = prevUserId;
+      });
+    } else if (userId && GithubDisk.isGithubId(userId) && !file.isFolder) {
+      GithubDisk.downloadFile(userId, file.id).then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = file.name;
+        a.click();
+        URL.revokeObjectURL(url);
+      }).catch(showError);
     } else if (file.webViewLink) {
       window.open(file.webViewLink, '_blank');
     }
@@ -625,16 +973,51 @@ const App = (() => {
     return `${userId}:${folderId}`;
   }
 
+  function toDiskNavId(diskId) {
+    return diskId.replace(':', '-');
+  }
+
+  function fromDiskNavId(navId) {
+    return navId.replace(/^local-/, 'local:');
+  }
+
+  function toGithubNavId(diskId) {
+    return encodeURIComponent(diskId);
+  }
+
+  function fromGithubNavId(navId) {
+    return decodeURIComponent(navId);
+  }
+
+  function folderNavId(userId, folderId) {
+    return `folder|${userId}|${folderId}`;
+  }
+
+  function parseFolderNav(nav) {
+    if (!nav?.startsWith('folder|')) return null;
+    const parts = nav.split('|');
+    if (parts.length < 3) return null;
+    return { userId: parts[1], folderId: parts.slice(2).join('|') };
+  }
+
+  function getDriveRootId() {
+    if (isCurrentLocalDrive()) return LocalDisk.ROOT_ID;
+    if (isCurrentGithubDrive()) return GithubDisk.ROOT_ID;
+    return Drive.ROOT_ID;
+  }
+
   function getActiveNavId() {
     if (state.level === 'home') return 'home';
     if (!state.currentUserId) return 'home';
+    const drivePrefix = isCurrentLocalDrive() ? 'disk' : isCurrentGithubDrive() ? 'github' : 'user';
     if (state.section === 'my-drive') {
-      if (state.currentFolderId !== Drive.ROOT_ID) {
-        return `folder:${state.currentUserId}:${state.currentFolderId}`;
+      const rootId = getDriveRootId();
+      if (state.currentFolderId !== rootId) {
+        return folderNavId(state.currentUserId, state.currentFolderId);
       }
-      return `user:${state.currentUserId}:my-drive`;
+      return `${drivePrefix}:${state.currentUserId}:my-drive`;
     }
-    return `user:${state.currentUserId}:${state.section}`;
+    return `${drivePrefix}:${state.currentUserId}:${state.section}`;
   }
 
   function setSidebarActive(itemId) {
@@ -684,7 +1067,11 @@ const App = (() => {
     const key = folderKey(userId, parentId);
     if (state.treeChildren[key]) return state.treeChildren[key];
 
-    const files = await Drive.listFiles(token, parentId);
+    const files = LocalDisk.isLocalId(userId)
+      ? await LocalDisk.listFiles(userId, parentId)
+      : GithubDisk.isGithubId(userId)
+        ? await GithubDisk.listFiles(userId, parentId)
+        : await Drive.listFiles(token, parentId);
     state.treeChildren[key] = files.map((f) => ({
       id: f.id,
       name: f.name,
@@ -726,16 +1113,25 @@ const App = (() => {
   async function syncTreeWithCurrentPath(userId, token) {
     if (state.section !== 'my-drive') return;
 
+    const rootId = LocalDisk.isLocalId(userId)
+      ? LocalDisk.ROOT_ID
+      : GithubDisk.isGithubId(userId)
+        ? GithubDisk.ROOT_ID
+        : Drive.ROOT_ID;
     state.expandedUsers.add(userId);
-    state.expandedFolders.add(folderKey(userId, Drive.ROOT_ID));
-    await loadTreeChildren(userId, token, Drive.ROOT_ID);
+    state.expandedFolders.add(folderKey(userId, rootId));
+    await loadTreeChildren(userId, token, rootId);
 
-    if (state.currentFolderId === Drive.ROOT_ID) return;
+    if (state.currentFolderId === rootId) return;
 
-    const path = await Drive.getFolderPath(token, state.currentFolderId);
+    const path = LocalDisk.isLocalId(userId)
+      ? await LocalDisk.getFolderPath(userId, state.currentFolderId)
+      : GithubDisk.isGithubId(userId)
+        ? await GithubDisk.getFolderPath(userId, state.currentFolderId)
+        : await Drive.getFolderPath(token, state.currentFolderId);
     for (const crumb of path) {
       await loadTreeChildren(userId, token, crumb.id);
-      if (crumb.id !== Drive.ROOT_ID) {
+      if (crumb.id !== rootId) {
         state.expandedFolders.add(folderKey(userId, crumb.id));
       }
     }
@@ -789,7 +1185,7 @@ const App = (() => {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'sidebar-item tree-folder-item';
-        btn.dataset.nav = `folder:${userId}:${item.id}`;
+        btn.dataset.nav = folderNavId(userId, item.id);
         btn.innerHTML = `
           <span class="sidebar-icon">📁</span>
           <span class="tree-folder-label">${escapeHtml(item.name)}</span>
@@ -797,6 +1193,7 @@ const App = (() => {
 
         row.appendChild(toggle);
         row.appendChild(btn);
+        bindDragDropForTreeItem(btn, { ...item, isFolder: true }, userId);
         addTreeMoreButton(row, () => ({
           type: 'folder',
           file: { ...item, isFolder: true },
@@ -825,17 +1222,18 @@ const App = (() => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'sidebar-item tree-file-item';
-      btn.dataset.nav = `file:${userId}:${item.id}`;
+      btn.dataset.nav = `file|${userId}|${item.id}`;
       btn.innerHTML = `
         <span class="sidebar-icon">${renderFileIcon(item, 'file-icon-wrap--tiny')}</span>
         <span class="tree-file-label">${escapeHtml(item.name)}</span>
       `;
       row.appendChild(btn);
+      bindDragDropForTreeItem(btn, item, userId);
       addTreeMoreButton(row, () => ({
         type: 'file',
         file: item,
         userId,
-        folderId: item.parents?.[0] || Drive.ROOT_ID,
+        folderId: item.parentId || item.parents?.[0] || (LocalDisk.isLocalId(userId) ? LocalDisk.ROOT_ID : GithubDisk.isGithubId(userId) ? GithubDisk.ROOT_ID : Drive.ROOT_ID),
         section: 'my-drive',
       }));
       li.appendChild(row);
@@ -881,7 +1279,7 @@ const App = (() => {
       userBtn.dataset.nav = userNav;
 
       const img = document.createElement('img');
-      img.className = 'sidebar-user-avatar';
+      img.className = 'sidebar-user-avatar avatar-img';
       img.alt = userLabel(user);
       img.src = Auth.getAvatarUrl(user.picture);
       Auth.applyAvatarFallback(img);
@@ -906,6 +1304,10 @@ const App = (() => {
       info.appendChild(quota);
       userBtn.appendChild(img);
       userBtn.appendChild(info);
+      attachDropTarget(userBtn, () => ({
+        destUserId: user.id,
+        destParentId: Drive.ROOT_ID,
+      }));
       row.appendChild(toggle);
       row.appendChild(userBtn);
       addTreeMoreButton(row, () => ({ type: 'user', userId: user.id, user }));
@@ -971,18 +1373,217 @@ const App = (() => {
         children.appendChild(sectionLi);
       });
 
-      const logoutLi = document.createElement('li');
-      const logoutRow = document.createElement('div');
-      logoutRow.className = 'tree-row';
-      logoutRow.appendChild(createTreeSpacer());
-      const logoutBtn = document.createElement('button');
-      logoutBtn.type = 'button';
-      logoutBtn.className = 'sidebar-item tree-logout-item';
-      logoutBtn.dataset.logoutUser = user.id;
-      logoutBtn.innerHTML = '<span class="sidebar-icon">🚪</span><span>Sign out</span>';
-      logoutRow.appendChild(logoutBtn);
-      logoutLi.appendChild(logoutRow);
-      children.appendChild(logoutLi);
+      li.appendChild(row);
+      li.appendChild(children);
+      list.appendChild(li);
+    });
+
+    LocalDisk.getDisks().forEach((disk) => {
+      const expanded = isUserExpanded(disk.id);
+      const diskNav = `disk:${toDiskNavId(disk.id)}`;
+
+      const li = document.createElement('li');
+      li.className = 'tree-user-node tree-local-node' + (expanded ? '' : ' collapsed');
+
+      const row = document.createElement('div');
+      row.className = 'tree-row';
+
+      const toggle = createTreeToggle({
+        type: 'local-disk',
+        userId: disk.id,
+        expanded,
+      });
+
+      const diskBtn = document.createElement('button');
+      diskBtn.type = 'button';
+      diskBtn.className = 'sidebar-item local-drive-item tree-user-btn';
+      diskBtn.dataset.nav = diskNav;
+
+      const icon = document.createElement('span');
+      icon.className = 'sidebar-icon local-storage-icon-wrap';
+      icon.innerHTML = renderLocalStorageIcon();
+
+      const info = document.createElement('div');
+      info.className = 'tree-user-info';
+
+      const label = document.createElement('span');
+      label.className = 'sidebar-user-label';
+      label.textContent = disk.name;
+
+      const quota = document.createElement('span');
+      quota.className = 'tree-user-quota';
+      quota.dataset.userId = disk.id;
+      quota.textContent = getQuotaLabel(disk.id);
+
+      info.appendChild(label);
+      info.appendChild(quota);
+      diskBtn.appendChild(icon);
+      diskBtn.appendChild(info);
+      attachDropTarget(diskBtn, () => ({
+        destUserId: disk.id,
+        destParentId: LocalDisk.ROOT_ID,
+      }));
+      row.appendChild(toggle);
+      row.appendChild(diskBtn);
+      addTreeMoreButton(row, () => ({ type: 'local-disk', diskId: disk.id, disk }));
+
+      const children = document.createElement('ul');
+      children.className = 'tree-children tree-level-2';
+
+      LOCAL_DISK_SECTIONS.forEach((section) => {
+        const sectionLi = document.createElement('li');
+        sectionLi.className = 'tree-section-node';
+
+        if (section.id === 'my-drive') {
+          const myDriveExpanded = isFolderExpanded(disk.id, LocalDisk.ROOT_ID);
+          sectionLi.classList.toggle('collapsed', !myDriveExpanded);
+
+          const sectionRow = document.createElement('div');
+          sectionRow.className = 'tree-row';
+
+          const sectionToggle = createTreeToggle({
+            type: 'my-drive',
+            userId: disk.id,
+            folderId: LocalDisk.ROOT_ID,
+            expanded: myDriveExpanded,
+          });
+
+          const sectionBtn = document.createElement('button');
+          sectionBtn.type = 'button';
+          sectionBtn.className = 'sidebar-item tree-child-item';
+          sectionBtn.dataset.nav = `${diskNav}:my-drive`;
+          sectionBtn.innerHTML = `
+            <span class="sidebar-icon">${section.icon}</span>
+            <span>${section.label}</span>
+          `;
+
+          sectionRow.appendChild(sectionToggle);
+          sectionRow.appendChild(sectionBtn);
+          sectionLi.appendChild(sectionRow);
+
+          const folderTree = document.createElement('ul');
+          folderTree.className = 'tree-children tree-level-3';
+          if (myDriveExpanded) {
+            renderTreeNodes(disk.id, LocalDisk.ROOT_ID, folderTree);
+          }
+          sectionLi.appendChild(folderTree);
+        } else {
+          const sectionRow = document.createElement('div');
+          sectionRow.className = 'tree-row';
+          sectionRow.appendChild(createTreeSpacer());
+
+          const sectionBtn = document.createElement('button');
+          sectionBtn.type = 'button';
+          sectionBtn.className = 'sidebar-item tree-child-item';
+          sectionBtn.dataset.nav = `${diskNav}:${section.id}`;
+          sectionBtn.innerHTML = `
+            <span class="sidebar-icon">${section.icon}</span>
+            <span>${section.label}</span>
+          `;
+
+          sectionRow.appendChild(sectionBtn);
+          sectionLi.appendChild(sectionRow);
+        }
+
+        children.appendChild(sectionLi);
+      });
+
+      li.appendChild(row);
+      li.appendChild(children);
+      list.appendChild(li);
+    });
+
+    GithubDisk.getDisks().forEach((disk) => {
+      const expanded = isUserExpanded(disk.id);
+      const diskNav = `github:${toGithubNavId(disk.id)}`;
+
+      const li = document.createElement('li');
+      li.className = 'tree-user-node tree-local-node' + (expanded ? '' : ' collapsed');
+
+      const row = document.createElement('div');
+      row.className = 'tree-row';
+
+      const toggle = createTreeToggle({
+        type: 'github-disk',
+        userId: disk.id,
+        expanded,
+      });
+
+      const diskBtn = document.createElement('button');
+      diskBtn.type = 'button';
+      diskBtn.className = 'sidebar-item user-drive-item tree-user-btn';
+      diskBtn.dataset.nav = diskNav;
+
+      const img = document.createElement('img');
+      img.className = 'sidebar-user-avatar avatar-img';
+      img.alt = disk.name;
+      img.src = disk.accountAvatar || Auth.getDefaultAvatarUrl();
+      Auth.applyAvatarFallback(img);
+
+      const info = document.createElement('div');
+      info.className = 'tree-user-info';
+
+      const label = document.createElement('span');
+      label.className = 'sidebar-user-label';
+      label.textContent = disk.name;
+
+      const quota = document.createElement('span');
+      quota.className = 'tree-user-quota';
+      quota.dataset.userId = disk.id;
+      quota.textContent = getQuotaLabel(disk.id);
+
+      info.appendChild(label);
+      info.appendChild(quota);
+      diskBtn.appendChild(img);
+      diskBtn.appendChild(info);
+      attachDropTarget(diskBtn, () => ({
+        destUserId: disk.id,
+        destParentId: GithubDisk.ROOT_ID,
+      }));
+      row.appendChild(toggle);
+      row.appendChild(diskBtn);
+      addTreeMoreButton(row, () => ({ type: 'github-disk', diskId: disk.id, disk }));
+
+      const children = document.createElement('ul');
+      children.className = 'tree-children tree-level-2';
+
+      GITHUB_DISK_SECTIONS.forEach((section) => {
+        const sectionLi = document.createElement('li');
+        sectionLi.className = 'tree-section-node';
+        const myDriveExpanded = isFolderExpanded(disk.id, GithubDisk.ROOT_ID);
+        sectionLi.classList.toggle('collapsed', !myDriveExpanded);
+
+        const sectionRow = document.createElement('div');
+        sectionRow.className = 'tree-row';
+
+        const sectionToggle = createTreeToggle({
+          type: 'my-drive',
+          userId: disk.id,
+          folderId: GithubDisk.ROOT_ID,
+          expanded: myDriveExpanded,
+        });
+
+        const sectionBtn = document.createElement('button');
+        sectionBtn.type = 'button';
+        sectionBtn.className = 'sidebar-item tree-child-item';
+        sectionBtn.dataset.nav = `${diskNav}:my-drive`;
+        sectionBtn.innerHTML = `
+          <span class="sidebar-icon">${section.icon}</span>
+          <span>${section.label}</span>
+        `;
+
+        sectionRow.appendChild(sectionToggle);
+        sectionRow.appendChild(sectionBtn);
+        sectionLi.appendChild(sectionRow);
+
+        const folderTree = document.createElement('ul');
+        folderTree.className = 'tree-children tree-level-3';
+        if (myDriveExpanded) {
+          renderTreeNodes(disk.id, GithubDisk.ROOT_ID, folderTree);
+        }
+        sectionLi.appendChild(folderTree);
+        children.appendChild(sectionLi);
+      });
 
       li.appendChild(row);
       li.appendChild(children);
@@ -1002,7 +1603,7 @@ const App = (() => {
       return;
     }
 
-    if (type === 'user') {
+    if (type === 'user' || type === 'local-disk' || type === 'github-disk') {
       const userId = toggle.dataset.userId;
       if (state.expandedUsers.has(userId)) {
         state.expandedUsers.delete(userId);
@@ -1027,8 +1628,15 @@ const App = (() => {
 
       state.expandedFolders.add(key);
       try {
-        const token = await Auth.ensureValidToken(userId);
-        await loadTreeChildren(userId, token, folderId);
+        if (LocalDisk.isLocalId(userId)) {
+          await loadTreeChildren(userId, null, folderId);
+        } else if (GithubDisk.isGithubId(userId)) {
+          await loadTreeChildren(userId, null, folderId);
+        } else {
+          const token = await Auth.tryGetValidToken(userId);
+          if (!token) throw new Error('Google sign-in required — right-click the Google drive in the sidebar and choose Re-login');
+          await loadTreeChildren(userId, token, folderId);
+        }
         renderSidebarTree();
       } catch (err) {
         state.expandedFolders.delete(key);
@@ -1037,40 +1645,35 @@ const App = (() => {
     }
   }
 
-  function updateActiveUserFooter() {
-    const user = Auth.getActiveUser();
-    const footer = $('#sidebar-user-footer');
-    if (!user) {
-      hide(footer);
-      return;
-    }
-    show(footer);
-    const avatar = $('#user-avatar');
-    avatar.src = Auth.getAvatarUrl(user.picture);
-    avatar.alt = userLabel(user);
-    Auth.applyAvatarFallback(avatar);
-    $('#user-name').textContent = userLabel(user);
-  }
-
   function dedupeBreadcrumbs(crumbs) {
     return crumbs.filter((crumb, i) => i === 0 || crumb.name !== crumbs[i - 1].name);
   }
 
   async function buildBreadcrumbs(token, folderId, user) {
+    const isLocal = LocalDisk.isLocalId(user.id);
+    const isGithub = GithubDisk.isGithubId(user.id);
+    const driveLabel = isLocal || isGithub ? user.name : userLabel(user);
+    const driveCrumbId = isLocal || isGithub ? user.id : `user:${user.id}`;
+    const rootId = isLocal ? LocalDisk.ROOT_ID : isGithub ? GithubDisk.ROOT_ID : Drive.ROOT_ID;
+
     if (state.section !== 'my-drive') {
       return dedupeBreadcrumbs([
         { id: ROOT_ID, name: ROOT_NAME },
-        { id: `user:${user.id}`, name: userLabel(user) },
+        { id: driveCrumbId, name: driveLabel },
         { id: state.section, name: SECTION_LABELS[state.section] || state.section },
       ]);
     }
 
-    const drivePath = await Drive.getFolderPath(token, folderId);
-    const foldersAfterUser = folderId === Drive.ROOT_ID ? [] : drivePath.slice(1);
+    const drivePath = isLocal
+      ? await LocalDisk.getFolderPath(user.id, folderId)
+      : isGithub
+        ? await GithubDisk.getFolderPath(user.id, folderId)
+        : await Drive.getFolderPath(token, folderId);
+    const foldersAfterUser = folderId === rootId ? [] : drivePath.slice(1);
 
     return dedupeBreadcrumbs([
       { id: ROOT_ID, name: ROOT_NAME },
-      { id: `user:${user.id}`, name: userLabel(user) },
+      { id: driveCrumbId, name: driveLabel },
       ...foldersAfterUser,
     ]);
   }
@@ -1102,47 +1705,77 @@ const App = (() => {
     showError(null);
     state.selectedId = null;
     $('#status-selected').textContent = '';
-    updateActiveUserFooter();
 
     try {
       if (state.level === 'home') {
         renderSidebarTree();
-        state.files = usersAsFileItems();
+        state.files = homeDriveItems();
         state.breadcrumbs = [{ id: ROOT_ID, name: ROOT_NAME }];
         setSidebarActive('home');
         refreshUserQuotas();
       } else {
         const userId = state.currentUserId || Auth.getActiveUser()?.id;
-        if (!userId) throw new Error('No user selected');
+        if (!userId) throw new Error('No drive selected');
 
-        const token = await Auth.ensureValidToken(userId);
-        const user = Auth.getUsers().find((u) => u.id === userId);
-        Auth.setActiveUser(userId);
-        state.currentUserId = userId;
+        if (LocalDisk.isLocalId(userId)) {
+          const disk = LocalDisk.getDisk(userId);
+          if (!disk) throw new Error('Local storage not found');
+          state.currentUserId = userId;
 
-        let files;
-        switch (state.section) {
-          case 'shared':
-            files = await Drive.listShared(token);
-            break;
-          case 'starred':
-            files = await Drive.listStarred(token);
-            break;
-          case 'recent':
-            files = await Drive.listRecent(token);
-            break;
-          case 'trash':
-            files = await Drive.listTrash(token);
-            break;
-          default:
-            files = await Drive.listFiles(token, state.currentFolderId);
+          let files;
+          if (state.section === 'trash') {
+            files = await LocalDisk.listTrash(userId);
+          } else {
+            files = await LocalDisk.listFiles(userId, state.currentFolderId);
+          }
+
+          state.files = files;
+          state.breadcrumbs = await buildBreadcrumbs(null, state.currentFolderId, disk);
+          await syncTreeWithCurrentPath(userId, null);
+          renderSidebarTree();
+          refreshUserQuotas();
+        } else if (GithubDisk.isGithubId(userId)) {
+          const disk = GithubDisk.getDisk(userId);
+          if (!disk) throw new Error('GitHub storage not found');
+          state.currentUserId = userId;
+          state.files = await GithubDisk.listFiles(userId, state.currentFolderId);
+          state.breadcrumbs = await buildBreadcrumbs(null, state.currentFolderId, disk);
+          await syncTreeWithCurrentPath(userId, null);
+          renderSidebarTree();
+          refreshUserQuotas();
+        } else {
+          const token = await Auth.tryGetValidToken(userId);
+          if (!token) {
+            throw new Error('Google sign-in required — right-click the Google drive in the sidebar and choose Re-login');
+          }
+          const user = Auth.getUsers().find((u) => u.id === userId);
+          Auth.setActiveUser(userId);
+          state.currentUserId = userId;
+
+          let files;
+          switch (state.section) {
+            case 'shared':
+              files = await Drive.listShared(token);
+              break;
+            case 'starred':
+              files = await Drive.listStarred(token);
+              break;
+            case 'recent':
+              files = await Drive.listRecent(token);
+              break;
+            case 'trash':
+              files = await Drive.listTrash(token);
+              break;
+            default:
+              files = await Drive.listFiles(token, state.currentFolderId);
+          }
+
+          state.files = files;
+          state.breadcrumbs = await buildBreadcrumbs(token, state.currentFolderId, user);
+          await syncTreeWithCurrentPath(userId, token);
+          renderSidebarTree();
+          refreshUserQuotas({ [userId]: token });
         }
-
-        state.files = files;
-        state.breadcrumbs = await buildBreadcrumbs(token, state.currentFolderId, user);
-        await syncTreeWithCurrentPath(userId, token);
-        renderSidebarTree();
-        refreshUserQuotas({ [userId]: token });
       }
 
       renderBreadcrumbs();
@@ -1181,6 +1814,28 @@ const App = (() => {
     loadCurrentLocation();
   }
 
+  function navigateToLocalDisk(diskId, folderId = LocalDisk.ROOT_ID) {
+    state.level = 'drive';
+    state.currentUserId = diskId;
+    state.currentFolderId = folderId;
+    state.section = 'my-drive';
+    state.expandedUsers.clear();
+    state.expandedUsers.add(diskId);
+    pushHistory();
+    loadCurrentLocation();
+  }
+
+  function navigateToGithubDisk(diskId, folderId = GithubDisk.ROOT_ID) {
+    state.level = 'drive';
+    state.currentUserId = diskId;
+    state.currentFolderId = folderId;
+    state.section = 'my-drive';
+    state.expandedUsers.clear();
+    state.expandedUsers.add(diskId);
+    pushHistory();
+    loadCurrentLocation();
+  }
+
   function navigateToFolder(folderId) {
     if (state.level !== 'drive') return;
     state.currentFolderId = folderId;
@@ -1208,16 +1863,21 @@ const App = (() => {
 
     if (state.section !== 'my-drive') {
       state.section = 'my-drive';
-      state.currentFolderId = Drive.ROOT_ID;
+      state.currentFolderId = getDriveRootId();
       pushHistory();
       loadCurrentLocation();
       return;
     }
 
-    if (state.currentFolderId !== Drive.ROOT_ID) {
+    const rootId = getDriveRootId();
+    if (state.currentFolderId !== rootId) {
       const parent = state.breadcrumbs[state.breadcrumbs.length - 2];
       if (parent.id.startsWith('user:')) {
         navigateToUser(parent.id.slice(5), Drive.ROOT_ID);
+      } else if (LocalDisk.getDisk(parent.id)) {
+        navigateToLocalDisk(parent.id, LocalDisk.ROOT_ID);
+      } else if (GithubDisk.getDisk(parent.id)) {
+        navigateToGithubDisk(parent.id, GithubDisk.ROOT_ID);
       } else {
         navigateToFolder(parent.id);
       }
@@ -1231,10 +1891,12 @@ const App = (() => {
     state.level = 'drive';
     state.currentUserId = userId;
     state.section = section;
-    state.currentFolderId = Drive.ROOT_ID;
+    state.currentFolderId = LocalDisk.isLocalId(userId) ? LocalDisk.ROOT_ID : GithubDisk.isGithubId(userId) ? GithubDisk.ROOT_ID : Drive.ROOT_ID;
     state.expandedUsers.clear();
     state.expandedUsers.add(userId);
-    Auth.setActiveUser(userId);
+    if (!isLocalOrGithubDrive(userId)) {
+      Auth.setActiveUser(userId);
+    }
     pushHistory();
     loadCurrentLocation();
   }
@@ -1246,16 +1908,55 @@ const App = (() => {
       return;
     }
 
-    const folderMatch = nav.match(/^folder:([^:]+):(.+)$/);
-    if (folderMatch) {
-      navigateToUser(folderMatch[1], folderMatch[2]);
+    const diskSectionMatch = nav.match(/^disk:([^:]+):(my-drive|trash)$/);
+    if (diskSectionMatch) {
+      switchUserSection(fromDiskNavId(diskSectionMatch[1]), diskSectionMatch[2]);
       return;
     }
 
-    const fileMatch = nav.match(/^file:([^:]+):(.+)$/);
+    const githubSectionMatch = nav.match(/^github:([^:]+):(my-drive)$/);
+    if (githubSectionMatch) {
+      switchUserSection(fromGithubNavId(githubSectionMatch[1]), githubSectionMatch[2]);
+      return;
+    }
+
+    const diskMatch = nav.match(/^disk:([^:]+)$/);
+    if (diskMatch) {
+      navigateToLocalDisk(fromDiskNavId(diskMatch[1]), LocalDisk.ROOT_ID);
+      return;
+    }
+
+    const githubMatch = nav.match(/^github:([^:]+)$/);
+    if (githubMatch) {
+      navigateToGithubDisk(fromGithubNavId(githubMatch[1]), GithubDisk.ROOT_ID);
+      return;
+    }
+
+    const folderMatch = parseFolderNav(nav);
+    if (folderMatch) {
+      if (LocalDisk.isLocalId(folderMatch.userId)) {
+        navigateToLocalDisk(folderMatch.userId, folderMatch.folderId);
+      } else if (GithubDisk.isGithubId(folderMatch.userId)) {
+        navigateToGithubDisk(folderMatch.userId, folderMatch.folderId);
+      } else {
+        navigateToUser(folderMatch.userId, folderMatch.folderId);
+      }
+      return;
+    }
+
+    const fileMatch = nav.match(/^file\|([^|]+)\|(.+)$/);
     if (fileMatch) {
-      const file = findTreeFile(fileMatch[1], fileMatch[2]);
-      if (file?.webViewLink) window.open(file.webViewLink, '_blank');
+      const [, userId, fileId] = fileMatch;
+      const file = findTreeFile(userId, fileId);
+      if (file) {
+        if (file.isFolder) {
+          if (LocalDisk.isLocalId(userId)) navigateToLocalDisk(userId, file.id);
+          else if (GithubDisk.isGithubId(userId)) navigateToGithubDisk(userId, file.id);
+          else navigateToUser(userId, file.id);
+        } else {
+          openFile(file, userId, { fromTree: true });
+        }
+      }
       return;
     }
 
@@ -1284,6 +1985,10 @@ const App = (() => {
     loadCurrentLocation();
   }
 
+  function hasMountedDrives() {
+    return Auth.hasUsers() || LocalDisk.getDisks().length > 0 || GithubDisk.getDisks().length > 0;
+  }
+
   function showLogin() {
     show($('#login-screen'));
     hide($('#explorer'));
@@ -1309,10 +2014,170 @@ const App = (() => {
     }
   }
 
+  function getFileParentId(file, userId) {
+    return file.parentId || file.parents?.[0] || (LocalDisk.isLocalId(userId) ? LocalDisk.ROOT_ID : GithubDisk.isGithubId(userId) ? GithubDisk.ROOT_ID : Drive.ROOT_ID);
+  }
+
+  const DRAG_MIME = 'application/x-mikus-drive-item';
+
+  function getDescendantFolderIds(userId, folderId) {
+    const ids = new Set([folderId]);
+    const walk = (parentId) => {
+      const key = folderKey(userId, parentId);
+      (state.treeChildren[key] || []).forEach((child) => {
+        if (child.isFolder) {
+          ids.add(child.id);
+          walk(child.id);
+        }
+      });
+    };
+    walk(folderId);
+    return ids;
+  }
+
+  function canDropItem(payload, target) {
+    const { userId: sourceUserId, parentId: sourceParentId, item } = payload;
+    const { destUserId, destParentId } = target;
+    if (!item || !destUserId || destParentId == null) return false;
+    if (item.id === destParentId) return false;
+    if (sourceUserId === destUserId && sourceParentId === destParentId && !item.isFolder) return false;
+    if (item.isFolder && sourceUserId === destUserId) {
+      const descendants = getDescendantFolderIds(sourceUserId, item.id);
+      if (descendants.has(destParentId)) return false;
+    }
+    return true;
+  }
+
+  function attachDragSource(el, file, userId, parentId) {
+    if (file.isUserDrive || file.isLocalDisk || file.isGithubDisk) return;
+    el.draggable = true;
+    el.addEventListener('dragstart', (e) => {
+      const payload = {
+        userId,
+        parentId,
+        item: {
+          id: file.id,
+          name: file.name,
+          isFolder: !!file.isFolder,
+          mimeType: file.mimeType,
+          parents: file.parents,
+          parentId: file.parentId,
+        },
+      };
+      e.dataTransfer.setData(DRAG_MIME, JSON.stringify(payload));
+      e.dataTransfer.effectAllowed = 'move';
+      el.classList.add('drag-source');
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('drag-source');
+      document.querySelectorAll('.drop-target-active').forEach((node) => {
+        node.classList.remove('drop-target-active');
+      });
+    });
+  }
+
+  function attachDropTarget(el, getTarget) {
+    el.addEventListener('dragover', (e) => {
+      if (![...e.dataTransfer.types].includes(DRAG_MIME)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      el.classList.add('drop-target-active');
+    });
+    el.addEventListener('dragleave', (e) => {
+      if (!el.contains(e.relatedTarget)) el.classList.remove('drop-target-active');
+    });
+    el.addEventListener('drop', async (e) => {
+      el.classList.remove('drop-target-active');
+      if (![...e.dataTransfer.types].includes(DRAG_MIME)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const raw = e.dataTransfer.getData(DRAG_MIME);
+      if (!raw) return;
+      let payload;
+      try {
+        payload = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      const target = getTarget();
+      if (!target || !canDropItem(payload, target)) return;
+      await handleItemDrop(payload, target);
+    });
+  }
+
+  async function handleItemDrop(payload, target) {
+    if (state.level !== 'home' && state.section !== 'my-drive') {
+      showError('Drag and drop is only available in My Drive.');
+      return;
+    }
+    const { userId: sourceUserId, parentId: sourceParentId, item } = payload;
+    try {
+      setLoading(true);
+      await ContextMenu.transferItems(
+        [item],
+        sourceUserId,
+        sourceParentId,
+        target.destUserId,
+        target.destParentId,
+        'cut'
+      );
+      showStatus(`Moved "${item.name}"`);
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function bindDragDropForWorkspaceItem(el, file) {
+    if (file.isUserDrive) {
+      attachDropTarget(el, () => ({
+        destUserId: file.userId,
+        destParentId: Drive.ROOT_ID,
+      }));
+      return;
+    }
+    if (file.isLocalDisk) {
+      attachDropTarget(el, () => ({
+        destUserId: file.userId,
+        destParentId: LocalDisk.ROOT_ID,
+      }));
+      return;
+    }
+    if (file.isGithubDisk) {
+      attachDropTarget(el, () => ({
+        destUserId: file.userId,
+        destParentId: GithubDisk.ROOT_ID,
+      }));
+      return;
+    }
+    if (state.section !== 'my-drive' || !state.currentUserId) return;
+    const userId = state.currentUserId;
+    const parentId = getFileParentId(file, userId);
+    attachDragSource(el, file, userId, parentId);
+    if (file.isFolder) {
+      attachDropTarget(el, () => ({
+        destUserId: userId,
+        destParentId: file.id,
+      }));
+    }
+  }
+
+  function bindDragDropForTreeItem(el, file, userId) {
+    const parentId = getFileParentId(file, userId);
+    attachDragSource(el, file, userId, parentId);
+    if (file.isFolder) {
+      attachDropTarget(el, () => ({
+        destUserId: userId,
+        destParentId: file.id,
+      }));
+    }
+  }
+
   function scheduleFallbackLogin() {
     cancelFallbackLogin();
     fallbackLoginTimer = setTimeout(() => {
-      if (!Auth.hasUsers()) showLogin();
+      if (!hasMountedDrives()) showExplorer();
     }, 4000);
   }
 
@@ -1321,11 +2186,15 @@ const App = (() => {
     $('#sidebar-overlay')?.addEventListener('click', closeSidebar);
 
     $('#btn-sign-in').addEventListener('click', () => Auth.signIn());
-    $('#btn-add-user').addEventListener('click', () => Auth.addUser());
+    $('#btn-add-user')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = e.currentTarget.getBoundingClientRect();
+      ContextMenu.showAddDiskMenu(rect.left, rect.bottom + 4);
+    });
 
     $('#btn-sign-out').addEventListener('click', () => {
-      Auth.signOutAll();
-      showLogin();
+      ejectAllDrives();
     });
 
     $('#btn-back').addEventListener('click', navigateBack);
@@ -1370,7 +2239,10 @@ const App = (() => {
       });
     });
 
-    $('.sidebar-tree-section').addEventListener('mousedown', () => ContextMenu.hide());
+    $('.sidebar-tree-section').addEventListener('mousedown', (e) => {
+      if (e.target.closest('.sidebar-add-btn')) return;
+      ContextMenu.hide();
+    });
     $('.sidebar-tree-section').addEventListener('focusin', () => ContextMenu.hide());
 
     $('.sidebar-tree-section').addEventListener('contextmenu', (e) => {
@@ -1378,6 +2250,32 @@ const App = (() => {
       if (rootBtn) {
         e.preventDefault();
         ContextMenu.show(e, { type: 'root' });
+        return;
+      }
+
+      const localBtn = e.target.closest('.local-drive-item');
+      if (localBtn) {
+        e.preventDefault();
+        const diskMatch = localBtn.dataset.nav?.match(/^disk:([^:]+)$/);
+        if (diskMatch) {
+          const disk = LocalDisk.getDisk(fromDiskNavId(diskMatch[1]));
+          if (disk) {
+            ContextMenu.show(e, { type: 'local-disk', diskId: disk.id, disk });
+          }
+        }
+        return;
+      }
+
+      const githubBtn = e.target.closest('.tree-user-btn[data-nav^="github:"]');
+      if (githubBtn) {
+        e.preventDefault();
+        const diskMatch = githubBtn.dataset.nav?.match(/^github:([^:]+)$/);
+        if (diskMatch) {
+          const disk = GithubDisk.getDisk(fromGithubNavId(diskMatch[1]));
+          if (disk) {
+            ContextMenu.show(e, { type: 'github-disk', diskId: disk.id, disk });
+          }
+        }
         return;
       }
 
@@ -1398,11 +2296,11 @@ const App = (() => {
       e.preventDefault();
 
       const nav = (folderBtn || fileBtn).dataset.nav;
-      const folderMatch = nav?.match(/^folder:([^:]+):(.+)$/);
-      const fileMatch = nav?.match(/^file:([^:]+):(.+)$/);
+      const folderMatch = parseFolderNav(nav);
+      const fileMatch = nav?.match(/^file\|([^|]+)\|(.+)$/);
 
       if (folderMatch) {
-        const [, userId, folderId] = folderMatch;
+        const { userId, folderId } = folderMatch;
         const item = findTreeItem(userId, folderId);
         if (item) {
           ContextMenu.show(e, {
@@ -1424,25 +2322,27 @@ const App = (() => {
             type: 'file',
             file,
             userId,
-            folderId: file.parents?.[0] || Drive.ROOT_ID,
+            folderId: file.parentId || file.parents?.[0] || (LocalDisk.isLocalId(userId) ? LocalDisk.ROOT_ID : GithubDisk.isGithubId(userId) ? GithubDisk.ROOT_ID : Drive.ROOT_ID),
             section: 'my-drive',
           });
         }
       }
     });
 
-    $('.sidebar-tree-section').addEventListener('click', (e) => {
-      const logoutBtn = e.target.closest('[data-logout-user]');
-      if (logoutBtn) {
-        e.preventDefault();
-        signOutUser(logoutBtn.dataset.logoutUser);
-        return;
-      }
-
+    $('.sidebar-tree-section').addEventListener('click', async (e) => {
       const reauthEl = e.target.closest('.tree-user-quota-reauth');
       if (reauthEl?.dataset.reauthUser) {
         e.preventDefault();
-        Auth.reauthorizeUser(reauthEl.dataset.reauthUser);
+        const userId = reauthEl.dataset.reauthUser;
+        Auth.setActiveUser(userId);
+        renderSidebarTree();
+        Auth.refreshTokenInteractive(userId)
+          .then(() => {
+            refreshUserQuotas();
+            const user = Auth.getUsers().find((u) => u.id === userId);
+            showStatus(`Signed in as ${userLabel(user)}`);
+          })
+          .catch((err) => showError(err.message));
         return;
       }
 
@@ -1470,7 +2370,7 @@ const App = (() => {
     document.addEventListener('keydown', (e) => {
       if (!$('#explorer') || $('#explorer').classList.contains('hidden')) return;
       const file = getSelectedFile();
-      const ctx = file && !file.isUserDrive ? buildFileContext(file) : null;
+      const ctx = file && !file.isUserDrive && !file.isLocalDisk && !file.isGithubDisk ? buildFileContext(file) : null;
 
       if (e.ctrlKey || e.metaKey) {
         if (e.key === 'c' && ctx) {
@@ -1512,10 +2412,21 @@ const App = (() => {
     return state.files.find((f) => f.id === state.selectedId);
   }
 
-  function init() {
+  async function init() {
+    Dialog.init();
+    LocalUser.init();
+    try {
+      await LocalDisk.init();
+    } catch (err) {
+      showError(err.message);
+    }
+    GithubDisk.init();
+
     ContextMenu.init({
       openFile,
       navigateToUser,
+      navigateToLocalDisk,
+      navigateToGithubDisk,
       navigateToMyGoogle,
       refresh: () => loadCurrentLocation(),
       refreshUserQuotas,
@@ -1523,9 +2434,11 @@ const App = (() => {
       showError,
       showStatus,
       signOutUser,
+      ejectLocalDisk,
+      ejectGithubDisk,
+      ejectAllDrives,
       signOutAll: () => {
-        Auth.signOutAll();
-        showLogin();
+        ejectAllDrives();
       },
       getUserQuota: (userId) => state.userQuotas[userId] || null,
       setUserQuota: (userId, quota) => {
@@ -1553,37 +2466,30 @@ const App = (() => {
       if (result.success) {
         cancelFallbackLogin();
         showLoginError(null);
+        LocalUser.seedFromGoogleIfNeeded();
         showExplorer();
+        renderSidebarTree();
         refreshUserQuotas();
         return;
       }
 
       if (result.error) {
         cancelFallbackLogin();
-        if (Auth.hasUsers()) {
+        if (hasMountedDrives()) {
           showExplorer();
         } else {
-          showLogin();
+          showExplorer();
           const silentErrors = ['popup_closed_by_user', 'access_denied', 'interaction_required'];
           if (!silentErrors.includes(result.error)) {
-            showLoginError(`Sign-in failed: ${result.error}`);
+            showError(`Sign-in failed: ${result.error}`);
           }
         }
         return;
       }
 
       if (result.initialized) {
-        if (Auth.hasUsers()) {
-          showExplorer();
-          if (Auth.needsScopeUpgrade()) {
-            const user = Auth.getActiveUser();
-            if (user) Auth.reauthorizeUser(user.id);
-          } else {
-            Auth.trySilentSignIn();
-          }
-        } else {
-          showLogin();
-        }
+        LocalUser.seedFromGoogleIfNeeded();
+        showExplorer();
       }
     });
   }
@@ -1591,4 +2497,6 @@ const App = (() => {
   return { init };
 })();
 
-document.addEventListener('DOMContentLoaded', App.init);
+document.addEventListener('DOMContentLoaded', () => {
+  App.init().catch((err) => console.error(err));
+});

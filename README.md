@@ -1,10 +1,20 @@
 # Mikus Drive
 
-A web file manager for one or more Google Drive accounts, developed by [Mykhailo Mikus](https://github.com/MishaMikusEleks). Browse folders, copy files between users, edit `.txt`/`.json` in Notepad, and share deep links — works on desktop and mobile, and deploys to GitHub Pages.
+A browser-based file manager with a Windows-style explorer UI, developed by [Mykhailo Mikus](https://github.com/MishaMikusEleks). Mount multiple storage backends in one place — **Google Drive**, **local browser storage**, and **GitHub repositories** — then browse folders, copy files between drives, edit `.txt`/`.json` in Notepad, and share deep links. Works on desktop and mobile; deploys to GitHub Pages.
 
 **Live demo:** [https://mishamikuseleks.github.io/mikus-drive/](https://mishamikuseleks.github.io/mikus-drive/)
 
-**Legal pages (for Google OAuth consent screen):**
+## Application description
+
+Use this text on OAuth registration forms (Google consent screen, GitHub OAuth App, etc.):
+
+> **Mikus Drive** is a client-side web file manager. Users choose which storage to connect: Google Drive accounts, local browser storage (IndexedDB), or private GitHub repositories created for file storage. The app runs entirely in the browser and talks to Google Drive and GitHub APIs only after the user signs in and grants permission. It does not operate a backend server or store user files on developer-owned infrastructure. Features include folder browsing, file create/rename/move/delete, cross-drive copy/paste where supported, a built-in Notepad for text and JSON files, and shareable path-based URLs.
+
+Shorter variant (GitHub OAuth **Application description** field, ~350 characters):
+
+> Mikus Drive is a browser file manager. After you authorize GitHub access, you can create or connect a private repository and use it as personal file storage from the app UI (browse, upload, edit, and delete files via the GitHub API). No backend server; data stays in your GitHub account.
+
+**Legal pages (for OAuth consent screens):**
 
 | Field | URL |
 |-------|-----|
@@ -16,11 +26,14 @@ A web file manager for one or more Google Drive accounts, developed by [Mykhailo
 
 ## Features
 
-- Multi-user Google sign-in (add several Drive accounts)
+- **Three storage types** — add from **Add storage** in the sidebar:
+  - **Google Drive** — sign in with Google; mount one or more accounts
+  - **Local Storage** — browser-only volumes (IndexedDB + localStorage metadata)
+  - **GitHub repo** — sign in with GitHub; auto-create a private `Drive-N` repository and use it as file storage
 - Windows-style explorer: tree, breadcrumbs, grid/list views, context menus
-- Path-based URLs (e.g. `/mikus-drive/jane.doe/My%20Drive/Projects`)
-- Cross-user cut/copy/paste
-- Built-in Notepad for text files (opens in a new tab)
+- Path-based URLs (e.g. `/mikus-drive/jane.doe/My%20Drive/Projects` or `/mikus-drive/Drive-1/My%20Drive/notes.txt`)
+- Cross-drive cut/copy/paste (Google ↔ Google, Local ↔ Local, Google ↔ Local; GitHub same-repo operations; cross-type with GitHub is limited)
+- Built-in Notepad for `.txt` and `.json` (opens in a new tab)
 - Mobile layout with slide-out navigation
 - Offline shell caching via `sw.js` (service worker)
 
@@ -32,12 +45,14 @@ See [Google OAuth setup for external users](#google-oauth-setup-for-external-use
 
 ### 2. Configure the app
 
-Edit `js/config.js` (or `js/site-config.js` for branding and base path):
+Edit `js/config.js` (Google + GitHub OAuth) and `js/site-config.js` (branding and base path):
 
 ```js
 const CONFIG = {
-  BASE_PATH: '/mikus-drive', // must match your GitHub repo name
+  BASE_PATH: '/mikus-drive', // must match your GitHub Pages repo name
   CLIENT_ID: 'YOUR_CLIENT_ID.apps.googleusercontent.com',
+  GITHUB_CLIENT_ID: 'YOUR_GITHUB_CLIENT_ID',
+  GITHUB_SCOPES: 'repo',
   SCOPES: [
     'openid',
     'email',
@@ -49,6 +64,8 @@ const CONFIG = {
 
 Never commit OAuth client secrets or downloaded `client_secret_*.json` files.
 
+**GitHub storage is optional.** Leave `GITHUB_CLIENT_ID` as `YOUR_GITHUB_CLIENT_ID` until you register a GitHub OAuth App (see [GitHub OAuth setup](#github-oauth-setup-for-storage)).
+
 ### 3. Run locally
 
 OAuth requires HTTP (not `file://`):
@@ -59,6 +76,45 @@ python3 serve.py
 ```
 
 Open `http://localhost:8080` (or the port shown). Add that origin in Google Cloud **Authorized JavaScript origins**.
+
+For GitHub storage, set the OAuth app **Authorization callback URL** to `http://localhost:8080/github-oauth-callback.html` (adjust port if needed).
+
+---
+
+## GitHub OAuth setup (for storage)
+
+GitHub repo storage uses the OAuth **Authorization Code flow with PKCE** in the browser. You only need a **Client ID** in the frontend (no client secret in the app).
+
+### Step 1 — Create a GitHub OAuth App
+
+1. Sign in to GitHub → **Settings** → **Developer settings** → **OAuth Apps** → **New OAuth App**
+2. Fill in:
+
+   | Field | Local dev | GitHub Pages (project site) |
+   |-------|-----------|------------------------------|
+   | Application name | Mikus Drive | Mikus Drive |
+   | Homepage URL | `http://localhost:8080` | `https://yourname.github.io/mikus-drive` |
+   | Authorization callback URL | `http://localhost:8080/github-oauth-callback.html` | `https://yourname.github.io/mikus-drive/github-oauth-callback.html` |
+
+3. Click **Register application**
+4. Copy the **Client ID** into `js/config.js` → `GITHUB_CLIENT_ID`
+
+### Step 2 — Scope
+
+The app requests the `repo` scope so it can create private repositories and read/write file contents on your behalf. You can set `GITHUB_SCOPES: 'repo'` in `js/config.js` (default).
+
+### Step 3 — Use GitHub storage in the app
+
+1. Open Mikus Drive → **Add storage** → **GitHub repo**
+2. Approve access in the GitHub popup
+3. The app creates a private repository named `Drive-1`, `Drive-2`, … and mounts it in the sidebar
+4. Use **My Drive** inside that volume like any other storage backend
+
+### Limits
+
+- GitHub [Contents API](https://docs.github.com/en/rest/repos/contents): **100 MB** per file; directory listings capped at **1000** entries per folder
+- Each save creates a **git commit** (fine for documents; avoid rapid autosave on large files)
+- Cross-drive copy/paste **to/from** GitHub and Google/Local is not fully supported yet; operations within the same GitHub repo work
 
 ---
 
@@ -287,24 +343,28 @@ Users who signed in under an old readonly scope may be prompted to sign in again
 ## Project structure
 
 ```
-├── index.html              # Main explorer
-├── notepad.html            # Standalone text editor
-├── 404.html                # GitHub Pages SPA fallback
-├── sw.js                   # Service worker
-├── manifest.webmanifest    # PWA manifest
+├── index.html                  # Main explorer
+├── notepad.html                # Standalone text editor
+├── github-oauth-callback.html  # GitHub OAuth popup callback
+├── 404.html                    # GitHub Pages SPA fallback
+├── sw.js                       # Service worker
+├── manifest.webmanifest        # PWA manifest
 ├── css/style.css
 ├── js/
-│   ├── site-config.js      # App name, URLs, Search Console verification
-│   ├── config.js           # Client ID, scopes, BASE_PATH
-│   ├── base-path.js        # GitHub Pages base path detection
-│   ├── register-sw.js      # Service worker registration
-│   ├── auth.js             # Multi-user OAuth
-│   ├── drive.js            # Drive API
-│   ├── router.js           # Path-based URLs
+│   ├── site-config.js          # App name, URLs, Search Console verification
+│   ├── config.js               # Google + GitHub client IDs, scopes, BASE_PATH
+│   ├── base-path.js            # GitHub Pages base path detection
+│   ├── register-sw.js          # Service worker registration
+│   ├── auth.js                 # Google multi-user OAuth
+│   ├── drive.js                # Google Drive API
+│   ├── localdisk.js            # Local browser storage backend
+│   ├── githubdisk.js           # GitHub repository storage backend
+│   ├── localuser.js            # Local profile display name
+│   ├── router.js               # Path-based URLs
 │   ├── notepad.js
 │   ├── contextmenu.js
 │   └── app.js
-└── serve.py                # Local dev server with SPA fallback
+└── serve.py                    # Local dev server with SPA fallback
 ```
 
 ## URL formats
@@ -312,12 +372,15 @@ Users who signed in under an old readonly scope may be prompted to sign in again
 | Page | Example |
 |------|---------|
 | Explorer root | `https://user.github.io/mikus-drive/` |
-| Folder | `https://user.github.io/mikus-drive/jane.doe/My%20Drive/Work` |
-| Notepad | `https://user.github.io/mikus-drive/notepad.html?file=/jane.doe/My%20Drive/notes.txt` |
+| Google Drive folder | `https://user.github.io/mikus-drive/jane.doe/My%20Drive/Work` |
+| Local storage folder | `https://user.github.io/mikus-drive/Local%20Storage/My%20Drive/Projects` |
+| GitHub repo folder | `https://user.github.io/mikus-drive/Drive-1/My%20Drive/notes` |
+| Notepad | `https://user.github.io/mikus-drive/notepad.html?file=/Drive-1/My%20Drive/notes.txt` |
 
 ## Notes
 
-- Full Drive scope allows create, edit, delete, and copy operations
-- Shared / Starred / Recent views are flat lists; opening a folder there jumps into the My Drive tree
-- Service worker caches static files only; Google API calls always use the network
+- **Google Drive:** full Drive scope allows create, edit, delete, and copy; Shared / Starred / Recent are flat lists
+- **Local storage:** data stays in the browser (IndexedDB); clearing site data removes volumes
+- **GitHub storage:** files live in repositories you own; tokens and mount metadata are stored in `localStorage`
+- Service worker caches static assets only; API calls use the network
 - On iOS Safari, "Add to Home Screen" uses `manifest.webmanifest` for a standalone-like experience

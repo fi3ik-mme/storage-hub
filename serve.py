@@ -7,6 +7,14 @@ import sys
 
 
 class SPAHandler(http.server.SimpleHTTPRequestHandler):
+    def end_headers(self):
+        path = self.path.split('?', 1)[0]
+        if path.endswith(('.js', '.css', '.html', '.webmanifest')) or path == '/sw.js':
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Expires', '0')
+        super().end_headers()
+
     def do_GET(self):
         path = self.path.split('?', 1)[0]
         file_path = self.translate_path(path)

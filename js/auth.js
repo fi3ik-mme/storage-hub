@@ -191,41 +191,51 @@ const Auth = (() => {
 
   function trySilentSignIn() {
     if (needsScopeUpgrade()) return;
-    requestToken({ prompt: '' });
+    const user = getActiveUser() || users[0];
+    if (!user) return;
+    requestToken({ prompt: '', hint: user.email });
+  }
+
+  function isTokenFresh(user) {
+    return !!user?.accessToken && user.expiresAt > Date.now() + 60_000;
+  }
+
+  async function tryGetValidToken(userId) {
+    const user = users.find((u) => u.id === userId);
+    if (!isTokenFresh(user)) return null;
+    const driveOk = await verifyDriveAccess(user.accessToken);
+    return driveOk ? user.accessToken : null;
   }
 
   async function ensureValidToken(userId) {
     const user = users.find((u) => u.id === userId);
     if (!user) throw new Error('User not found');
 
-    if (user.scopes && user.scopes !== CONFIG.SCOPES) {
-      return new Promise((resolve, reject) => {
-        const prev = onAuthCallback;
-        onAuthCallback = (result) => {
-          onAuthCallback = prev;
-          if (result.success) resolve(getToken(userId));
-          else reject(new Error(result.error || 'Additional Google Drive access is required'));
-        };
-        reauthorizeUser(userId);
-      });
-    }
+    const cached = await tryGetValidToken(userId);
+    if (cached) return cached;
 
-    if (user.expiresAt > Date.now() + 60_000) {
-      const driveOk = await verifyDriveAccess(user.accessToken);
-      if (driveOk) return user.accessToken;
-    }
+    const err = new Error('Google sign-in required — right-click the Google drive in the sidebar and choose Re-login');
+    err.code = 'AUTH_REQUIRED';
+    throw err;
+  }
+
+  async function refreshTokenInteractive(userId) {
+    const user = users.find((u) => u.id === userId);
+    if (!user) throw new Error('User not found');
 
     return new Promise((resolve, reject) => {
       const prev = onAuthCallback;
       onAuthCallback = (result) => {
         onAuthCallback = prev;
-        if (result.success) {
-          resolve(getToken(userId));
-        } else {
-          reject(new Error(result.error || 'Session expired — sign in again'));
-        }
+        if (result.success) resolve(getToken(userId));
+        else reject(new Error(result.error || 'Sign-in failed'));
       };
-      requestToken({ prompt: user.expiresAt > Date.now() ? '' : 'consent', hint: user.email });
+
+      const needsConsent = user.scopes && user.scopes !== CONFIG.SCOPES;
+      requestToken({
+        prompt: needsConsent ? 'consent' : 'select_account',
+        hint: user.email,
+      });
     });
   }
 
@@ -282,15 +292,77 @@ const Auth = (() => {
     return email;
   }
 
+  function resolveAssetUrl(href) {
+    if (!href) return href;
+    if (/^https?:/i.test(href) || href.startsWith('data:') || href.startsWith('blob:')) {
+      return href;
+    }
+    if (typeof BasePath !== 'undefined') {
+      return BasePath.prefixRelativeAsset(href);
+    }
+    return href;
+  }
+
+  function getDefaultAvatarUrl() {
+    return resolveAssetUrl(DEFAULT_AVATAR);
+  }
+
+  function isUsablePicture(picture) {
+    return typeof picture === 'string' && picture.trim().length > 0;
+  }
+
   function getAvatarUrl(picture) {
-    return picture || DEFAULT_AVATAR;
+    if (!isUsablePicture(picture)) return getDefaultAvatarUrl();
+    return resolveAssetUrl(picture.trim());
+  }
+
+  function isDefaultAvatarImg(img) {
+    if (!img?.src) return false;
+    try {
+      return new URL(img.src, location.href).href === new URL(getDefaultAvatarUrl(), location.href).href;
+    } catch {
+      return img.src.includes('default-avatar');
+    }
+  }
+
+  function swapAvatarToFallback(img) {
+    const fallback = getDefaultAvatarUrl();
+    if (!isDefaultAvatarImg(img)) {
+      img.removeAttribute('srcset');
+      img.src = fallback;
+    }
   }
 
   function applyAvatarFallback(img) {
-    img.addEventListener('error', () => {
-      img.onerror = null;
-      img.src = DEFAULT_AVATAR;
-    }, { once: true });
+    if (!img || img.dataset.avatarFallbackBound) return;
+    img.dataset.avatarFallbackBound = '1';
+
+    if (img.complete && img.naturalWidth === 0 && img.src && !isDefaultAvatarImg(img)) {
+      swapAvatarToFallback(img);
+      return;
+    }
+
+    img.addEventListener('error', () => swapAvatarToFallback(img), { once: true });
+  }
+
+  function applyAvatarFallbacks(root = document) {
+    root.querySelectorAll('img.user-drive-avatar, img.sidebar-user-avatar, img.avatar-img')
+      .forEach(applyAvatarFallback);
+  }
+
+  function checkAvatarUrl(url) {
+    const fallback = getDefaultAvatarUrl();
+    if (!isUsablePicture(url)) return Promise.resolve(fallback);
+
+    const resolved = resolveAssetUrl(url.trim());
+    if (resolved === fallback) return Promise.resolve(fallback);
+
+    return new Promise((resolve) => {
+      const probe = new Image();
+      probe.onload = () => resolve(resolved);
+      probe.onerror = () => resolve(fallback);
+      probe.src = resolved;
+    });
   }
 
   return {
@@ -299,7 +371,10 @@ const Auth = (() => {
     signIn,
     addUser,
     trySilentSignIn,
+    tryGetValidToken,
+    isTokenFresh,
     ensureValidToken,
+    refreshTokenInteractive,
     signOutAll,
     reauthorizeUser,
     needsScopeUpgrade,
@@ -310,7 +385,10 @@ const Auth = (() => {
     removeUser,
     hasUsers,
     formatDisplayEmail,
+    getDefaultAvatarUrl,
     getAvatarUrl,
     applyAvatarFallback,
+    applyAvatarFallbacks,
+    checkAvatarUrl,
   };
 })();
