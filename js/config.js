@@ -3,7 +3,7 @@
 const CONFIG = {
   // Must match your GitHub repo name on GitHub Pages.
   BASE_PATH: typeof SITE !== 'undefined' ? SITE.basePath : '/storage-hub',
-  CLIENT_ID: '218406181224-47iproj29idug4uvlc63u569l375dju6.apps.googleusercontent.com',
+  CLIENT_ID: '1048248785186-1pq9mf68o2h8sggqikfvtmdcf446q4g8.apps.googleusercontent.com',
   // GitHub OAuth App Client ID. Callback URL must match GitHub app settings (see README).
   // Optional override: GITHUB_REDIRECT_URI: 'http://localhost:8080/github-oauth-callback.html',
   // Optional token proxy (serve.py or Cloudflare Worker — see README):
