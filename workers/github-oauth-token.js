@@ -11,7 +11,7 @@ const TOKEN_PATH = '/api/github/oauth/token';
 
 /** Origins allowed to call this worker (add your GitHub Pages URL). */
 const ALLOWED_ORIGINS = new Set([
-  'https://mishamikuseleks.github.io',
+  'https://fi3ik-mme.github.io',
   'http://localhost:8080',
   'http://127.0.0.1:8080',
 ]);

@@ -2,9 +2,9 @@ const SITE = {
   name: 'Storage Hub',
   tagline: 'A unified file manager for Google Drive, local storage, and GitHub repositories.',
   developer: 'Mykhailo Mikus',
-  developerUrl: 'https://github.com/MishaMikusEleks',
-  githubRepo: 'https://github.com/MishaMikusEleks/storage-hub',
-  homepage: 'https://mishamikuseleks.github.io/storage-hub/',
+  developerUrl: 'https://github.com/fi3ik-mme',
+  githubRepo: 'https://github.com/fi3ik-mme/storage-hub',
+  homepage: 'https://fi3ik-mme.github.io/storage-hub/',
   basePath: '/storage-hub',
   // Search Console → URL prefix → HTML tag → paste content value here.
   // Must also appear as a static <meta> inside <head> of index.html (Google does not run JS).

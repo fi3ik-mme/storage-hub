@@ -1,4 +1,5 @@
 .git_key
+.github_cred
 .github_secret
 .env
 node_modules/
