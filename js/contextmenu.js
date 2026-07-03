@@ -916,7 +916,7 @@ const ContextMenu = (() => {
     } catch (err) {
       const message = err.message || '';
       if (/sign-in cancelled/i.test(message)) return;
-      if (/invalid github token|write access|could not access|already connected|repository name cannot be empty/i.test(message)) {
+      if (/invalid github token|write access|could not access|already connected|repository name cannot be empty|repository creation failed|could not create a drive repository/i.test(message)) {
         await Dialog.alert(message, { title: 'GitHub sign-in failed' });
         return;
       }

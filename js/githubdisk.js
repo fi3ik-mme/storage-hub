@@ -1126,6 +1126,8 @@ const GithubDisk = (() => {
       '<li>Click <strong>Generate new token</strong> → <strong>Generate new token (classic)</strong>.</li>' +
       '<li>Enter a note (e.g. <em>Storage Hub</em>) and choose an expiration.</li>' +
       '<li>Under scopes, check <strong>repo</strong> (full control of private repositories).</li>' +
+      '<li>Do <strong>not</strong> use a fine-grained token (<code>github_pat_…</code>) — only classic (<code>ghp_…</code>) can auto-create repos.</li>' +
+      '<li><code>public_repo</code> alone is not enough; private <code>Drive-1</code> repos need the full <code>repo</code> scope.</li>' +
       '<li>Click <strong>Generate token</strong>, copy the token (<code>ghp_…</code>) — GitHub shows it only once.</li>' +
       '<li>Paste the token in the field below and click <strong>Connect</strong>.</li>' +
       '</ol>' +
@@ -1239,11 +1241,18 @@ const GithubDisk = (() => {
     try {
       return await createDriveRepository(token);
     } catch (err) {
-      if (isPatRepoCreateError(err)) {
+      if (isPatRepoCreateError(err) || isRepoCreatePermissionError(err)) {
         return connectExistingRepository(
           token,
           profile,
           'This token cannot create new repositories. Use a classic token with the repo scope, or connect an existing repository.'
+        );
+      }
+      if (/repository creation failed|could not create a drive repository/i.test(err?.message || '')) {
+        return connectExistingRepository(
+          token,
+          profile,
+          'Automatic repository creation failed. You can connect an existing private repo instead.'
         );
       }
       throw err;
@@ -1311,6 +1320,27 @@ const GithubDisk = (() => {
     }
   }
 
+  function formatGitHubApiError(payload, status) {
+    const parts = [];
+    if (payload?.message) parts.push(payload.message);
+    const details = (payload?.errors || [])
+      .map((entry) => entry.message || entry.code)
+      .filter(Boolean);
+    if (details.length) parts.push(details.join('; '));
+    return parts.join(' — ') || `GitHub API error (${status})`;
+  }
+
+  function isRepoNameTakenError(err) {
+    const msg = (err?.message || String(err)).toLowerCase();
+    return /name already exists|already exists on this account/.test(msg);
+  }
+
+  function isRepoCreatePermissionError(err) {
+    const msg = (err?.message || String(err)).toLowerCase();
+    return isPatRepoCreateError(err)
+      || /insufficient scope|must have push access|admin access to this repository|repository creation failed.*forbidden/i.test(msg);
+  }
+
   async function apiRequest(path, token, options = {}) {
     let res;
     try {
@@ -1333,7 +1363,7 @@ const GithubDisk = (() => {
     }
     if (!res.ok) {
       const err = await readJsonResponse(res).catch(() => ({}));
-      throw new Error(err.message || `GitHub API error (${res.status})`);
+      throw new Error(formatGitHubApiError(err, res.status));
     }
     if (options.raw) return res;
     if (res.status === 204) return null;
@@ -1366,11 +1396,14 @@ const GithubDisk = (() => {
           }),
         });
       } catch (err) {
-        if (/name already exists/i.test(err.message || '')) continue;
+        if (isRepoNameTakenError(err)) continue;
         throw err;
       }
     }
-    throw new Error('Could not create Drive repository automatically');
+    throw new Error(
+      'Could not create a Drive repository automatically after 50 attempts.\n\n' +
+      'Create an empty private repo at github.com/new (e.g. Drive-1), then connect it manually.'
+    );
   }
 
   function upsertDiskFromRepo(profile, repo, token) {
