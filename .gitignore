@@ -1,5 +1,6 @@
 .git_key
 .cred
+.cursor/mcp.env
 .github_secret
 .env
 node_modules/
