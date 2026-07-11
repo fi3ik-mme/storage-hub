@@ -20,10 +20,12 @@ const App = (() => {
     treeChildren: {},
     treeVisibleCount: {},
     userQuotas: {},
+    processingItemIds: new Set(),
   };
 
   let urlPushPending = false;
   let initialRouteApplied = false;
+  let progressTimer = null;
 
   const USER_SECTIONS = [
     { id: 'my-drive', icon: '📁', label: 'My Drive' },
@@ -795,6 +797,11 @@ const App = (() => {
   }
 
   function renderFileIcon(file, sizeClass = '') {
+    const inner = renderFileIconContent(file, sizeClass);
+    return wrapFileIconWithProgress(file, inner, sizeClass);
+  }
+
+  function renderFileIconContent(file, sizeClass = '') {
     if (file.isUserDrive) {
       const user = Auth.getUsers().find((u) => u.id === file.userId);
       return renderGoogleDriveIcon(user || { picture: file.picture }, 'user-drive-avatar');
@@ -821,9 +828,134 @@ const App = (() => {
     </span>`;
   }
 
+  function shouldShowFileProgress(file) {
+    if (typeof OperationProgress === 'undefined') return false;
+    if (state.processingItemIds.has(file.id)) return true;
+    if (file.pending && file.pendingStatus !== 'error') return true;
+    return false;
+  }
+
+  function resolveFileProgressSnapshot(file) {
+    if (typeof OperationProgress === 'undefined') return null;
+    return OperationProgress.findSnapshotForFile(file.id, file);
+  }
+
+  function wrapFileIconWithProgress(file, innerHtml, sizeClass = '') {
+    if (!shouldShowFileProgress(file)) return innerHtml;
+
+    const snap = resolveFileProgressSnapshot(file);
+    const percent = snap?.percent ?? (file.pendingKind === 'delete' ? 12 : 6);
+    const eta = snap?.remainingMs ? OperationProgress.formatEta(snap.remainingMs) : '';
+    const shellClass = ['file-icon-shell', sizeClass].filter(Boolean).join(' ');
+    const progressId = snap?.id || file.id;
+
+    return `<span class="${shellClass}" data-progress-id="${escapeHtml(progressId)}" data-progress-fallback="${file.pendingStartedAt ? '1' : '0'}" data-progress-key="${escapeHtml(file.pendingOperationKey || '')}" data-progress-started="${file.pendingStartedAt || ''}" data-progress-size="${file.pendingSize || file.size || 0}">
+      <span class="file-icon-shell__content">${innerHtml}</span>
+      <span class="file-icon-progress" role="progressbar" aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100"${eta ? ` title="~${escapeHtml(eta)} left"` : ''}>
+        <span class="file-icon-progress__bar" style="width:${percent}%"></span>
+      </span>
+    </span>`;
+  }
+
+  function updateProgressBars() {
+    if (typeof OperationProgress === 'undefined') return;
+    document.querySelectorAll('[data-progress-id]').forEach((shell) => {
+      let snap = OperationProgress.getSnapshot(shell.dataset.progressId);
+      if (!snap && shell.dataset.progressFallback === '1') {
+        const started = Number(shell.dataset.progressStarted);
+        const operationKey = shell.dataset.progressKey;
+        const size = Number(shell.dataset.progressSize) || 0;
+        if (started && operationKey) {
+          snap = OperationProgress.snapshotFromStartedAt(operationKey, started, size);
+        }
+      }
+      if (!snap) return;
+      const bar = shell.querySelector('.file-icon-progress__bar');
+      const track = shell.querySelector('.file-icon-progress');
+      if (bar) bar.style.width = `${snap.percent}%`;
+      if (track) {
+        track.setAttribute('aria-valuenow', String(snap.percent));
+        const eta = OperationProgress.formatEta(snap.remainingMs);
+        if (eta) track.title = `~${eta} left`;
+      }
+    });
+
+    document.querySelectorAll('.file-item[data-id], .list-row[data-id]').forEach((el) => {
+      const file = state.files.find((entry) => entry.id === el.dataset.id);
+      if (!file || (!file.pending && !state.processingItemIds.has(file.id))) return;
+      const label = getPendingDisplayLabel(file);
+      const badge = el.querySelector('.file-pending-badge');
+      if (badge) badge.textContent = label;
+      const modified = el.querySelector('.col-modified');
+      if (modified && file.pending) modified.textContent = label;
+    });
+  }
+
+  function hasRenderableProgress() {
+    if (typeof OperationProgress !== 'undefined' && OperationProgress.hasActive()) return true;
+    if (state.processingItemIds.size > 0) return true;
+    return state.files.some((file) => file.pending && file.pendingStatus !== 'error');
+  }
+
+  function syncProgressLoop() {
+    if (!hasRenderableProgress()) {
+      if (progressTimer) {
+        clearInterval(progressTimer);
+        progressTimer = null;
+      }
+      return;
+    }
+    updateProgressBars();
+    if (!progressTimer) {
+      progressTimer = setInterval(() => {
+        if (!hasRenderableProgress()) {
+          clearInterval(progressTimer);
+          progressTimer = null;
+          return;
+        }
+        updateProgressBars();
+      }, 250);
+    }
+  }
+
+  function markItemsProcessing(itemIds = []) {
+    itemIds.forEach((id) => state.processingItemIds.add(id));
+    renderCurrentView();
+  }
+
+  function unmarkItemsProcessing(itemIds = []) {
+    if (!itemIds.length) state.processingItemIds.clear();
+    else itemIds.forEach((id) => state.processingItemIds.delete(id));
+    renderCurrentView();
+  }
+
   function getPendingDisplayLabel(file) {
+    if (typeof OperationProgress !== 'undefined') {
+      const snap = resolveFileProgressSnapshot(file);
+      if (snap?.remainingMs) {
+        const eta = OperationProgress.formatEta(snap.remainingMs);
+        if (eta) return `${getPendingStatusText(file)} · ~${eta}`;
+      }
+    }
+    return getPendingStatusText(file);
+  }
+
+  function getFilePendingClasses(file) {
+    if (!file.pending && !state.processingItemIds.has(file.id)) return '';
+    const status = file.pendingStatus || 'syncing';
+    const kindClass = file.pendingKind === 'delete' ? ' file-item--pending-kind-delete' : '';
+    return ` file-item--pending file-item--pending-${status}${kindClass}`;
+  }
+
+  function getPendingStatusText(file) {
+    if (file.pendingKind === 'delete') {
+      if (file.pendingStatus === 'pending') return 'Finishing delete…';
+      if (file.pendingStatus === 'error') return file.pendingError || 'Delete failed';
+      return 'Deleting…';
+    }
+    if (state.processingItemIds.has(file.id)) return 'Deleting…';
     if (file.pendingStatus === 'error') return file.pendingError || 'Failed';
-    if (file.pending && file.dateFormatted) return file.dateFormatted;
+    if (file.pending && file.dateFormatted && !file.dateFormatted.includes('~')) return file.dateFormatted;
     if (file.pendingStatus === 'saving') return 'Saving…';
     if (file.pendingStatus === 'moving') return 'Moving…';
     if (file.pendingStatus === 'pending') {
@@ -836,9 +968,10 @@ const App = (() => {
   }
 
   function renderFileStatusBadge(file) {
-    if (file.pending) {
+    if (file.pending || state.processingItemIds.has(file.id)) {
       const label = getPendingDisplayLabel(file);
-      return `<span class="file-pending-badge file-pending-badge--${file.pendingStatus || 'syncing'}">${escapeHtml(label)}</span>`;
+      const status = file.pendingStatus || (state.processingItemIds.has(file.id) ? 'syncing' : 'syncing');
+      return `<span class="file-pending-badge file-pending-badge--${status}">${escapeHtml(label)}</span>`;
     }
     if (file.isUserDrive || file.isLocalDisk || file.isGithubDisk) {
       return `<span class="file-quota">${escapeHtml(file.quotaLabel || '…')}</span>`;
@@ -852,7 +985,7 @@ const App = (() => {
 
     state.files.forEach((file) => {
       const item = document.createElement('div');
-      const pendingClass = file.pending ? ` file-item--pending file-item--pending-${file.pendingStatus || 'syncing'}` : '';
+      const pendingClass = getFilePendingClasses(file);
       item.className = 'file-item' + (file.id === state.selectedId ? ' selected' : '') + pendingClass;
       item.dataset.id = file.id;
       const statusHtml = renderFileStatusBadge(file);
@@ -879,10 +1012,12 @@ const App = (() => {
 
     state.files.forEach((file) => {
       const row = document.createElement('div');
-      const pendingClass = file.pending ? ` file-item--pending file-item--pending-${file.pendingStatus || 'syncing'}` : '';
+      const pendingClass = getFilePendingClasses(file);
       row.className = 'list-row' + (file.id === state.selectedId ? ' selected' : '') + pendingClass;
       row.dataset.id = file.id;
-      const modifiedLabel = file.pending ? getPendingDisplayLabel(file) : file.dateFormatted;
+      const modifiedLabel = (file.pending || state.processingItemIds.has(file.id))
+        ? getPendingDisplayLabel(file)
+        : file.dateFormatted;
       row.innerHTML = `
         <span class="col-name">
           <span class="list-icon">${renderFileIcon(file, 'file-icon-wrap--small')}</span>
@@ -999,6 +1134,7 @@ const App = (() => {
 
     const count = state.files.length;
     $('#status-count').textContent = `${count} item${count !== 1 ? 's' : ''}`;
+    syncProgressLoop();
   }
 
   function setView(view) {
@@ -2505,6 +2641,9 @@ const App = (() => {
   }
 
   async function init() {
+    if (typeof BasePath !== 'undefined') {
+      BasePath.redirectBareRootIfNeeded();
+    }
     Dialog.init();
     LocalUser.init();
     try {
@@ -2515,7 +2654,7 @@ const App = (() => {
     GithubDisk.init();
     GithubDisk.setListChangeListener((diskId) => {
       if (GithubDisk.isGithubId(state.currentUserId) && state.currentUserId === diskId) {
-        refreshGithubFolderView({ reloadTree: false, silent: true });
+        refreshGithubFolderView({ reloadTree: true, silent: true });
       }
     });
 
@@ -2528,6 +2667,8 @@ const App = (() => {
       refresh: () => refreshCurrentDrive({ reloadTree: true }),
       refreshGithubFolder: () => refreshGithubFolderView({ reloadTree: true }),
       refreshUserQuotas,
+      markItemsProcessing,
+      unmarkItemsProcessing,
       clearTreeCache,
       showError,
       showStatus,

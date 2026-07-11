@@ -87,43 +87,47 @@ const Notepad = (() => {
     return '';
   }
 
-  function buildEditorUrl(filePath) {
-    const page = typeof BasePath !== 'undefined'
-      ? BasePath.url('/notepad.html')
-      : (() => {
-        const base = getNotepadBasePath();
-        return base ? `${base}/notepad.html` : '/notepad.html';
-      })();
+  function getNotepadPagePath() {
+    if (typeof BasePath !== 'undefined') return BasePath.url('/notepad.html');
+    const base = getNotepadBasePath();
+    return base ? `${base}/notepad.html` : '/notepad.html';
+  }
+
+  function buildEditorPath(filePath) {
     const params = new URLSearchParams({ file: filePath });
-    return new URL(`${page}?${params}`, location.origin).href;
+    return `${getNotepadPagePath()}?${params}`;
+  }
+
+  function buildEditorUrl(filePath) {
+    return new URL(buildEditorPath(filePath), location.origin).href;
   }
 
   function fixStandaloneNotepadLocation() {
     if (!document.getElementById('notepad-app')) return;
-    const pathname = location.pathname;
-    if (!pathname.endsWith('/notepad.html')) return;
 
-    const expected = typeof BasePath !== 'undefined'
-      ? BasePath.url('/notepad.html')
-      : (() => {
-        const base = getNotepadBasePath();
-        return base ? `${base}/notepad.html` : '/notepad.html';
-      })();
+    const normalizedPath = location.pathname.replace(/\/notepad\.html\/+$/, '/notepad.html');
+    if (normalizedPath !== location.pathname) {
+      location.replace(`${normalizedPath}${location.search}${location.hash}`);
+      return;
+    }
 
-    if (pathname === expected) return;
+    if (!normalizedPath.endsWith('/notepad.html')) return;
+
+    const expected = getNotepadPagePath();
+    if (normalizedPath === expected) return;
 
     const redirect = `${expected}${location.search}${location.hash}`;
-    if (`${pathname}${location.search}${location.hash}` !== redirect) {
+    if (`${normalizedPath}${location.search}${location.hash}` !== redirect) {
       location.replace(redirect);
     }
   }
 
   function syncBrowserUrl() {
     if (!isStandalone || !state.filePath) return;
-    const url = buildEditorUrl(state.filePath);
+    const pathAndQuery = buildEditorPath(state.filePath);
     const current = location.pathname + location.search;
-    if (current !== url && !current.endsWith(url)) {
-      window.history.replaceState(null, '', url);
+    if (current !== pathAndQuery) {
+      window.history.replaceState(null, '', pathAndQuery);
     }
   }
 
@@ -310,6 +314,16 @@ const Notepad = (() => {
     const localDisk = LocalDisk.getDiskByName(segments[0]);
     if (localDisk) {
       state.filePath = fileParam.startsWith('/') ? fileParam : `/${fileParam}`;
+      const handoff = peekNotepadHandoff(state.filePath);
+      if (handoff?.userId === localDisk.id) {
+        if (!LocalDisk.isNotepadFile(handoff.file)) {
+          app.showError('Only .txt and .json files can be opened in Notepad.');
+          return;
+        }
+        takeNotepadHandoff(state.filePath);
+        await openResolvedNotepadFile(handoff.file, handoff.userId);
+        return;
+      }
       try {
         const { diskId, file } = await LocalDisk.resolveFileByPath(segments);
         if (!LocalDisk.isNotepadFile(file)) {
@@ -327,6 +341,16 @@ const Notepad = (() => {
     const githubDisk = GithubDisk.getDiskByName(segments[0]);
     if (githubDisk) {
       state.filePath = fileParam.startsWith('/') ? fileParam : `/${fileParam}`;
+      const handoff = peekNotepadHandoff(state.filePath);
+      if (handoff?.userId === githubDisk.id) {
+        if (!GithubDisk.isNotepadFile(handoff.file)) {
+          app.showError('Only .txt and .json files can be opened in Notepad.');
+          return;
+        }
+        takeNotepadHandoff(state.filePath);
+        await openResolvedNotepadFile(handoff.file, handoff.userId);
+        return;
+      }
       try {
         const { diskId, file } = await GithubDisk.resolveFileByPath(segments);
         if (!GithubDisk.isNotepadFile(file)) {
@@ -364,11 +388,21 @@ const Notepad = (() => {
 
   async function openDraftFromPath(segments, userId, errorMessage) {
     const fileName = segments[segments.length - 1] || 'Untitled.txt';
-    state.fileId = null;
-    state.fileName = fileName;
-    state.mimeType = fileName.toLowerCase().endsWith('.json') ? 'application/json' : 'text/plain';
-    state.userId = userId;
-    state.parentId = null;
+    const handoff = state.filePath ? peekNotepadHandoff(state.filePath) : null;
+    if (handoff?.userId === userId && handoff.file) {
+      takeNotepadHandoff(state.filePath);
+      state.fileId = handoff.file.id;
+      state.fileName = handoff.file.name || fileName;
+      state.mimeType = handoff.file.mimeType || (fileName.toLowerCase().endsWith('.json') ? 'application/json' : 'text/plain');
+      state.userId = userId;
+      state.parentId = handoff.file.parentId || handoff.file.parents?.[0] || null;
+    } else {
+      state.fileId = null;
+      state.fileName = fileName;
+      state.mimeType = fileName.toLowerCase().endsWith('.json') ? 'application/json' : 'text/plain';
+      state.userId = userId;
+      state.parentId = null;
+    }
     state.dirty = false;
     state.loading = false;
 
@@ -1004,6 +1038,64 @@ const Notepad = (() => {
     positionEl.textContent = `Ln ${line}, Col ${col}`;
   }
 
+  const NOTEPAD_HANDOFF_PREFIX = 'storage-hub:notepad-handoff:';
+  const NOTEPAD_HANDOFF_TTL_MS = 120000;
+
+  function normalizeNotepadPath(filePath) {
+    if (!filePath) return '';
+    return filePath.startsWith('/') ? filePath : `/${filePath}`;
+  }
+
+  function stashNotepadHandoff(filePath, userId, file) {
+    try {
+      localStorage.setItem(`${NOTEPAD_HANDOFF_PREFIX}${normalizeNotepadPath(filePath)}`, JSON.stringify({
+        userId,
+        file: {
+          id: file.id,
+          name: file.name,
+          mimeType: file.mimeType || 'text/plain',
+          parentId: file.parentId || file.parents?.[0] || null,
+        },
+        expires: Date.now() + NOTEPAD_HANDOFF_TTL_MS,
+      }));
+    } catch {
+      // Ignore storage quota or private-mode errors.
+    }
+  }
+
+  function peekNotepadHandoff(filePath) {
+    const key = `${NOTEPAD_HANDOFF_PREFIX}${normalizeNotepadPath(filePath)}`;
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (!data?.userId || !data?.file || Date.now() > data.expires) return null;
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  function takeNotepadHandoff(filePath) {
+    const key = `${NOTEPAD_HANDOFF_PREFIX}${normalizeNotepadPath(filePath)}`;
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      localStorage.removeItem(key);
+      const data = JSON.parse(raw);
+      if (!data?.userId || !data?.file || Date.now() > data.expires) return null;
+      return data;
+    } catch {
+      localStorage.removeItem(key);
+      return null;
+    }
+  }
+
+  async function openResolvedNotepadFile(file, diskId) {
+    syncBrowserUrl();
+    await open(file, diskId);
+  }
+
   async function openInTab(file, userId) {
     const filePath = LocalDisk.isLocalId(userId)
       ? await LocalDisk.buildNotepadFilePath(userId, file)
@@ -1015,6 +1107,7 @@ const Notepad = (() => {
         const token = await Auth.ensureValidToken(userId);
         return Drive.buildNotepadFilePath(token, Auth.formatDisplayEmail(user.email), file);
       })();
+    stashNotepadHandoff(filePath, userId, file);
     window.open(buildEditorUrl(filePath), '_blank', 'noopener');
   }
 
@@ -1087,6 +1180,8 @@ const Notepad = (() => {
       hideBanner();
       state.dirty = false;
       updateStatus();
+      if (!state.filePath) await updateFilePathInUrl();
+      else syncBrowserUrl();
       app.showStatus(`Saved "${state.fileName}"`);
       app.clearTreeCache?.(state.userId);
     } catch (err) {

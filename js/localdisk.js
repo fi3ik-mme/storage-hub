@@ -494,6 +494,24 @@ const LocalDisk = (() => {
     return mapEntry(entry);
   }
 
+  async function findSiblingByName(diskId, parentId, name) {
+    const siblings = await listFiles(diskId, parentId);
+    return siblings.find((item) => item.name.toLowerCase() === name.toLowerCase()) || null;
+  }
+
+  async function replaceFile(diskId, parentId, name, mimeType, content = '') {
+    const existing = await findSiblingByName(diskId, parentId, name);
+    if (!existing || existing.isFolder) throw new Error('File not found');
+    const entry = await getEntry(existing.id);
+    const text = typeof content === 'string' ? content : '';
+    entry.mimeType = mimeType;
+    entry.content = text;
+    entry.size = new TextEncoder().encode(text).length;
+    entry.modifiedAt = Date.now();
+    await putEntry(entry);
+    return mapEntry(entry);
+  }
+
   async function renameFile(diskId, fileId, name) {
     const entry = await getEntry(fileId);
     if (!entry || entry.diskId !== diskId) throw new Error('File not found');
@@ -788,6 +806,8 @@ const LocalDisk = (() => {
     listTrash,
     createFolder,
     createFile,
+    replaceFile,
+    findSiblingByName,
     renameFile,
     trashFile,
     restoreFile,

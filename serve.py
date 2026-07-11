@@ -12,6 +12,18 @@ import urllib.request
 GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token'
 TOKEN_PROXY_PATH = '/api/github/oauth/token'
 GITHUB_SECRET_FILE = '.github_secret'
+STATIC_ASSET_SUFFIXES = (
+    '.js', '.css', '.png', '.svg', '.jpg', '.jpeg', '.gif', '.webp', '.ico',
+    '.webmanifest', '.woff', '.woff2', '.map', '.json', '.txt', '.html',
+)
+STATIC_ASSET_PREFIXES = ('/js/', '/css/', '/assets/')
+
+
+def is_static_asset_request(path):
+    lower = path.lower()
+    if lower.endswith(STATIC_ASSET_SUFFIXES):
+        return True
+    return any(prefix in lower for prefix in STATIC_ASSET_PREFIXES)
 
 
 def read_github_oauth_credentials(root):
@@ -166,6 +178,8 @@ class SPAHandler(http.server.SimpleHTTPRequestHandler):
                 return super().do_GET()
 
         if not os.path.exists(file_path) or os.path.isdir(file_path):
+            if is_static_asset_request(path):
+                return self.send_error(404)
             self.path = '/index.html'
 
         return super().do_GET()

@@ -2,37 +2,37 @@ const Router = (() => {
   const ROOT_LABEL = typeof SITE !== 'undefined' ? SITE.name : 'Storage Hub';
   let suppressRoute = false;
   let onNavigate = null;
-  let basePath;
 
-  function detectBasePath() {
-    if (basePath !== undefined) return basePath;
-
-    if (typeof BasePath !== 'undefined') {
-      basePath = BasePath.get();
-      return basePath;
-    }
-
-    if (typeof BasePath !== 'undefined') {
-      basePath = BasePath.get();
-      return basePath;
-    }
+  function getBasePath() {
+    if (typeof BasePath !== 'undefined') return BasePath.get();
 
     const pathname = location.pathname;
     if (pathname.endsWith('/index.html')) {
-      basePath = pathname.slice(0, -'/index.html'.length).replace(/\/$/, '');
-      return basePath;
+      return pathname.slice(0, -'/index.html'.length).replace(/\/$/, '');
     }
-    if (pathname.endsWith('/notepad.html')) {
-      basePath = pathname.slice(0, -'/notepad.html'.length).replace(/\/$/, '');
-      return basePath;
+    if (pathname.endsWith('/notepad.html') || /\/notepad\.html\/+$/.test(pathname)) {
+      return pathname.replace(/\/notepad\.html\/?$/, '').replace(/\/$/, '');
     }
-
-    basePath = '';
-    return basePath;
+    return '';
   }
 
-  function getBasePath() {
-    return detectBasePath();
+  function getHomePath() {
+    if (typeof BasePath !== 'undefined' && typeof BasePath.getEntryPath === 'function') {
+      return BasePath.getEntryPath('index.html');
+    }
+    const base = getBasePath();
+    return base ? `${base}/index.html` : '/index.html';
+  }
+
+  function stripAppPathPrefix(pathname) {
+    let rest = pathname || location.pathname;
+    if (rest.endsWith('/index.html')) {
+      rest = rest.slice(0, -'/index.html'.length);
+    }
+    if (/\/notepad\.html\/?$/.test(rest)) {
+      rest = rest.replace(/\/notepad\.html\/?$/, '');
+    }
+    return rest;
   }
 
   function init(navigateCallback) {
@@ -42,24 +42,22 @@ const Router = (() => {
 
   function handleRouteEvent() {
     if (suppressRoute) return;
+    if (typeof BasePath !== 'undefined' && BasePath.redirectBareRootIfNeeded()) return;
     const segments = getInitialSegments();
     onNavigate?.(segments);
   }
 
   function segmentsToPath(urlSegments) {
+    if (!urlSegments?.length) return getHomePath();
     const base = getBasePath();
-    if (!urlSegments?.length) return base || '/';
     const encoded = urlSegments.map((s) => encodeURIComponent(s)).join('/');
     return base ? `${base}/${encoded}` : `/${encoded}`;
   }
 
   function parsePathToSegments(pathname) {
-    let rest = pathname || location.pathname;
-    if (rest.endsWith('/index.html')) {
-      rest = rest.slice(0, -'/index.html'.length);
-    }
+    let rest = stripAppPathPrefix(pathname);
 
-    const base = detectBasePath();
+    const base = getBasePath();
     if (base && (rest === base || rest.startsWith(`${base}/`))) {
       rest = rest.slice(base.length);
     }
@@ -98,8 +96,18 @@ const Router = (() => {
     return a.every((seg, i) => seg === b[i]);
   }
 
+  function normalizeNavPath(path) {
+    const bare = (path || '').replace(/\/+$/, '') || '/';
+    if (bare === '/') return getHomePath();
+
+    const base = getBasePath();
+    if (base && bare === base) return getHomePath();
+
+    return path;
+  }
+
   function syncUrl(urlSegments, usePush = false) {
-    const path = segmentsToPath(urlSegments);
+    const path = normalizeNavPath(segmentsToPath(urlSegments));
     if (location.pathname === path && !location.hash && !location.search) return;
 
     suppressRoute = true;
@@ -135,6 +143,7 @@ const Router = (() => {
     ROOT_LABEL,
     init,
     getBasePath,
+    getHomePath,
     segmentsToPath,
     parsePathToSegments,
     parseHashToSegments,

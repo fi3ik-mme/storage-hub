@@ -6,18 +6,19 @@ const GithubDisk = (() => {
   const LEGACY_STORAGE_KEY = 'mikus_drive_github_disks';
   const OAUTH_MESSAGE_SOURCE = 'storage-hub-github-oauth';
   const API_BASE = 'https://api.github.com';
-  // GitHub docs: recommend repos under 1 GB; repos above ~100 GB may be blocked.
-  const RECOMMENDED_REPO_SIZE_BYTES = 1024 * 1024 * 1024;
+  // GitHub docs: repos above ~100 GB may be blocked.
   const MAX_REPO_SIZE_BYTES = 100 * 1024 * 1024 * 1024;
 
   let disks = [];
   const repoTreeCache = new Map();
   const pendingByFolder = new Map();
   const saveStateByPath = new Map();
+  const deleteStateByPath = new Map();
   const moveStateByPath = new Map();
   const pendingConfirmTimers = new Map();
   const saveConfirmTimers = new Map();
   const moveConfirmTimers = new Map();
+  const deleteConfirmTimers = new Map();
   let listChangeListener = null;
   let saveStateListener = null;
 
@@ -34,12 +35,14 @@ const GithubDisk = (() => {
   }
 
   function getPendingStatusLabel(status, options = {}) {
+    if (status === 'syncing' && options.kind === 'delete') return 'Deleting…';
     if (status === 'syncing') return 'Uploading…';
     if (status === 'saving') return 'Saving…';
     if (status === 'moving') return 'Moving…';
     if (status === 'pending') {
       if (options.kind === 'save') return 'Pending save…';
       if (options.kind === 'move') return 'Pending movement…';
+      if (options.kind === 'delete') return 'Finishing delete…';
       return 'Pending on GitHub…';
     }
     if (status === 'error') return options.error || 'Failed';
@@ -95,6 +98,63 @@ const GithubDisk = (() => {
     return `${diskId}\0${parent}`;
   }
 
+  function trackOperationStart(itemId, kind, size = 0) {
+    if (typeof OperationProgress === 'undefined' || !itemId) return;
+    OperationProgress.start(itemId, OperationProgress.key('github', kind), { size });
+  }
+
+  function trackOperationFinish(itemId, success = true) {
+    if (typeof OperationProgress === 'undefined' || !itemId) return;
+    OperationProgress.finish(itemId, success);
+  }
+
+  function trackOperationTransfer(fromId, toId) {
+    if (typeof OperationProgress === 'undefined' || !fromId || !toId || fromId === toId) return;
+    OperationProgress.transfer(fromId, toId);
+  }
+
+  function pendingOperationKey(entry) {
+    if (typeof OperationProgress === 'undefined') return null;
+    return OperationProgress.key('github', entry?.kind || 'create');
+  }
+
+  function applyPendingEntryToFile(file, entry) {
+    return {
+      ...file,
+      pending: true,
+      pendingStatus: entry.status,
+      pendingKind: entry.kind || 'create',
+      pendingError: entry.error,
+      pendingStartedAt: entry.progressStartedAt || Date.now(),
+      pendingOperationKey: pendingOperationKey(entry),
+      pendingSize: entry.size || 0,
+      dateFormatted: getPendingStatusLabel(entry.status, {
+        kind: entry.kind || 'create',
+        error: entry.error,
+      }),
+    };
+  }
+
+  function applyPendingStateFromEntries(diskId, parentId, files) {
+    const entries = getPendingEntries(diskId, parentId);
+    if (!entries.length) return files;
+
+    const pendingByName = new Map();
+    entries.forEach((entry) => {
+      if (entry.status === 'error') return;
+      pendingByName.set(entry.name.toLowerCase(), entry);
+    });
+    if (!pendingByName.size) return files;
+
+    return files.map((file) => {
+      if (file.pending || file.isFolder) return file;
+      const entry = pendingByName.get(file.name.toLowerCase());
+      if (!entry) return file;
+      trackOperationTransfer(entry.tempId, file.id);
+      return applyPendingEntryToFile(file, entry);
+    });
+  }
+
   function addPending(diskId, parentId, meta) {
     const tempId = `pending:${crypto.randomUUID()}`;
     const key = pendingFolderKey(diskId, parentId);
@@ -110,8 +170,10 @@ const GithubDisk = (() => {
       error: null,
       expectedPath: meta.expectedPath || null,
       sourcePath: meta.sourcePath || null,
+      progressStartedAt: performance.now(),
     });
     pendingByFolder.set(key, list);
+    trackOperationStart(tempId, meta.kind || 'create', meta.size || 0);
     notifyListChange(diskId);
     return tempId;
   }
@@ -130,9 +192,14 @@ const GithubDisk = (() => {
     for (const [key, list] of pendingByFolder.entries()) {
       const idx = list.findIndex((entry) => entry.tempId === tempId);
       if (idx === -1) continue;
+      const entry = list[idx];
       list.splice(idx, 1);
       if (!list.length) pendingByFolder.delete(key);
       else pendingByFolder.set(key, list);
+      trackOperationFinish(tempId, true);
+      if (entry?.expectedPath) {
+        trackOperationFinish(normalizePath(entry.expectedPath), true);
+      }
       notifyListChange(key.split('\0')[0]);
       return;
     }
@@ -144,6 +211,7 @@ const GithubDisk = (() => {
       if (!entry) continue;
       entry.status = 'error';
       entry.error = message || 'Upload failed';
+      trackOperationFinish(tempId, false);
       notifyListChange(key.split('\0')[0]);
       return;
     }
@@ -174,6 +242,9 @@ const GithubDisk = (() => {
       pendingStatus: entry.status,
       pendingKind: entry.kind || 'create',
       pendingError: entry.error,
+      pendingStartedAt: entry.progressStartedAt || performance.now(),
+      pendingOperationKey: pendingOperationKey(entry),
+      pendingSize: entry.size || 0,
     };
   }
 
@@ -188,6 +259,11 @@ const GithubDisk = (() => {
         pendingStatus: moveState.status,
         pendingKind: 'move',
         pendingError: moveState.error,
+        pendingStartedAt: moveState.progressStartedAt || performance.now(),
+        pendingOperationKey: typeof OperationProgress !== 'undefined'
+          ? OperationProgress.key('github', 'move')
+          : null,
+        pendingSize: moveState.size || file.size || 0,
         dateFormatted: getPendingStatusLabel(moveState.status, {
           kind: 'move',
           error: moveState.error,
@@ -201,6 +277,7 @@ const GithubDisk = (() => {
     const moveState = moveStateByPath.get(key);
     if (!moveState) return;
     if (moveState.destPendingId) resolvePending(moveState.destPendingId);
+    trackOperationFinish(normalizePath(sourcePath), true);
     moveStateByPath.delete(key);
     moveConfirmTimers.delete(key);
     notifyListChange(diskId);
@@ -272,6 +349,7 @@ const GithubDisk = (() => {
         moveState.status = 'error';
         moveState.error = 'Timed out waiting for GitHub to confirm the move';
         if (moveState.destPendingId) failPending(moveState.destPendingId, moveState.error);
+        trackOperationFinish(normalizePath(sourcePath), false);
         notifyListChange(diskId);
         moveConfirmTimers.delete(key);
         return;
@@ -285,6 +363,7 @@ const GithubDisk = (() => {
 
   async function runPendingMove(diskId, sourcePath, toParentId, meta, action) {
     const key = moveStateKey(diskId, sourcePath);
+    const normalizedSource = normalizePath(sourcePath);
     const destPendingId = addPending(diskId, toParentId, {
       name: meta.name,
       isFolder: meta.isFolder,
@@ -292,9 +371,10 @@ const GithubDisk = (() => {
       size: meta.size || 0,
       status: 'moving',
       kind: 'move',
-      sourcePath: normalizePath(sourcePath),
+      sourcePath: normalizedSource,
       expectedPath: normalizePath(meta.destPath),
     });
+    trackOperationStart(normalizedSource, 'move', meta.size || 0);
 
     moveStateByPath.set(key, {
       status: 'moving',
@@ -305,6 +385,8 @@ const GithubDisk = (() => {
       name: meta.name,
       isFolder: !!meta.isFolder,
       mimeType: meta.mimeType,
+      size: meta.size || 0,
+      progressStartedAt: performance.now(),
       error: null,
     });
     notifyListChange(diskId);
@@ -321,6 +403,7 @@ const GithubDisk = (() => {
       return { id: meta.destPath, name: meta.name, isFolder: !!meta.isFolder };
     } catch (err) {
       failPending(destPendingId, err?.message || String(err));
+      trackOperationFinish(normalizedSource, false);
       moveStateByPath.set(key, {
         ...moveStateByPath.get(key),
         status: 'error',
@@ -342,6 +425,11 @@ const GithubDisk = (() => {
         pendingStatus: saveState.status,
         pendingError: saveState.error,
         pendingKind: 'save',
+        pendingStartedAt: saveState.progressStartedAt || performance.now(),
+        pendingOperationKey: typeof OperationProgress !== 'undefined'
+          ? OperationProgress.key('github', 'save')
+          : null,
+        pendingSize: saveState.size || file.size || 0,
         dateFormatted: getPendingStatusLabel(saveState.status, {
           kind: 'save',
           error: saveState.error,
@@ -350,11 +438,186 @@ const GithubDisk = (() => {
     });
   }
 
+  function applyDeleteStateToFiles(diskId, files) {
+    return files.map((file) => {
+      if (file.pending) return file;
+      const state = deleteStateByPath.get(saveStateKey(diskId, file.id));
+      if (!state) return file;
+      return {
+        ...file,
+        pending: true,
+        pendingStatus: state.status,
+        pendingKind: 'delete',
+        pendingError: state.error,
+        pendingStartedAt: state.progressStartedAt || performance.now(),
+        pendingOperationKey: typeof OperationProgress !== 'undefined'
+          ? OperationProgress.key('github', 'delete')
+          : null,
+        pendingSize: state.size || file.size || 0,
+        dateFormatted: getPendingStatusLabel(state.status, {
+          kind: 'delete',
+          error: state.error,
+        }),
+      };
+    });
+  }
+
+  function isMissingGitHubPathError(err) {
+    const msg = (err?.message || String(err)).toLowerCase();
+    return /404|not found/.test(msg);
+  }
+
+  async function isDeletedOnServer(disk, filePath, isFolder) {
+    const path = normalizePath(filePath);
+    if (!path) return true;
+
+    if (!isFolder) {
+      try {
+        await getFileContentMeta(disk, path);
+        return false;
+      } catch (err) {
+        return isMissingGitHubPathError(err);
+      }
+    }
+
+    try {
+      const tree = await getRepoTree(disk, { force: true });
+      return !isPathVisibleInTree(tree, path, true);
+    } catch (err) {
+      if (isEmptyGitTreeError(err)) return true;
+      throw err;
+    }
+  }
+
+  function resolveDeleteState(diskId, filePath) {
+    const path = normalizePath(filePath);
+    const key = saveStateKey(diskId, path);
+    if (!deleteStateByPath.has(key)) return;
+    deleteStateByPath.delete(key);
+    deleteConfirmTimers.delete(key);
+    trackOperationFinish(path, true);
+    invalidateRepoTree(diskId);
+    notifyListChange(diskId);
+  }
+
+  async function confirmDeleteOnServer(diskId, filePath, isFolder) {
+    const path = normalizePath(filePath);
+    const key = saveStateKey(diskId, path);
+    const state = deleteStateByPath.get(key);
+    if (!state || state.status !== 'pending') return false;
+
+    const disk = getDisk(diskId);
+    if (!disk) {
+      resolveDeleteState(diskId, path);
+      return true;
+    }
+
+    try {
+      if (await isDeletedOnServer(disk, path, isFolder)) {
+        resolveDeleteState(diskId, path);
+        return true;
+      }
+    } catch {
+      // GitHub may still be updating — keep polling.
+    }
+    return false;
+  }
+
+  function scheduleDeleteConfirmation(diskId, filePath, isFolder) {
+    const path = normalizePath(filePath);
+    const key = saveStateKey(diskId, path);
+    if (deleteConfirmTimers.has(key)) return;
+
+    let attempts = 0;
+    const maxAttempts = 90;
+
+    const tick = async () => {
+      attempts += 1;
+      const state = deleteStateByPath.get(key);
+      if (!state || state.status !== 'pending') {
+        deleteConfirmTimers.delete(key);
+        return;
+      }
+
+      const confirmed = await confirmDeleteOnServer(diskId, path, isFolder);
+      if (confirmed) {
+        deleteConfirmTimers.delete(key);
+        return;
+      }
+
+      if (attempts >= maxAttempts) {
+        deleteStateByPath.set(key, {
+          ...state,
+          status: 'error',
+          error: 'Timed out waiting for GitHub to confirm the delete',
+        });
+        trackOperationFinish(path, false);
+        notifyListChange(diskId);
+        deleteConfirmTimers.delete(key);
+        return;
+      }
+
+      deleteConfirmTimers.set(key, setTimeout(tick, 2000));
+    };
+
+    deleteConfirmTimers.set(key, setTimeout(tick, 1000));
+  }
+
+  async function runPendingDelete(diskId, filePath, meta, action) {
+    const path = normalizePath(filePath);
+    const key = saveStateKey(diskId, path);
+    const isFolder = !!meta?.isFolder;
+    const startedAt = performance.now();
+    deleteStateByPath.set(key, {
+      status: 'syncing',
+      error: null,
+      name: meta?.name || path.split('/').pop(),
+      isFolder,
+      size: meta?.size || 0,
+      progressStartedAt: startedAt,
+      kind: 'delete',
+    });
+    trackOperationStart(path, 'delete', meta?.size || 0);
+    notifyListChange(diskId);
+
+    try {
+      await action();
+      const existing = deleteStateByPath.get(key);
+      deleteStateByPath.set(key, {
+        status: 'pending',
+        error: null,
+        name: meta?.name || path.split('/').pop(),
+        isFolder,
+        size: meta?.size || 0,
+        progressStartedAt: existing?.progressStartedAt || startedAt,
+        kind: 'delete',
+      });
+      invalidateRepoTree(diskId);
+      notifyListChange(diskId);
+      scheduleDeleteConfirmation(diskId, path, isFolder);
+      confirmDeleteOnServer(diskId, path, isFolder);
+    } catch (err) {
+      deleteStateByPath.set(key, {
+        status: 'error',
+        error: err?.message || String(err),
+        name: meta?.name || path.split('/').pop(),
+        isFolder,
+        size: meta?.size || 0,
+        progressStartedAt: startedAt,
+        kind: 'delete',
+      });
+      trackOperationFinish(path, false);
+      notifyListChange(diskId);
+      throw err;
+    }
+  }
+
   function resolveFileSave(diskId, filePath) {
     const key = saveStateKey(diskId, filePath);
     if (!saveStateByPath.has(key)) return;
     saveStateByPath.delete(key);
     saveConfirmTimers.delete(key);
+    trackOperationFinish(normalizePath(filePath), true);
     notifySaveStateChange(diskId, filePath);
   }
 
@@ -416,6 +679,7 @@ const GithubDisk = (() => {
       if (attempts >= maxAttempts) {
         saveState.status = 'error';
         saveState.error = 'Timed out waiting for GitHub to confirm the save';
+        trackOperationFinish(normalizePath(filePath), false);
         notifySaveStateChange(diskId, filePath);
         saveConfirmTimers.delete(key);
         return;
@@ -442,6 +706,7 @@ const GithubDisk = (() => {
   async function runPendingFileSave(diskId, filePath, meta, action) {
     const path = normalizePath(filePath);
     const key = saveStateKey(diskId, path);
+    trackOperationStart(path, 'save', meta?.size || 0);
     saveStateByPath.set(key, {
       status: 'saving',
       error: null,
@@ -449,6 +714,7 @@ const GithubDisk = (() => {
       kind: 'save',
       name: meta?.name || path.split('/').pop(),
       size: meta?.size || 0,
+      progressStartedAt: performance.now(),
     });
     notifySaveStateChange(diskId, path);
 
@@ -465,6 +731,7 @@ const GithubDisk = (() => {
         name: meta?.name || path.split('/').pop(),
         size: meta?.size || 0,
       });
+      trackOperationFinish(path, false);
       notifySaveStateChange(diskId, path);
       throw err;
     }
@@ -472,11 +739,12 @@ const GithubDisk = (() => {
 
   function mergePendingFiles(diskId, parentId, files) {
     const withSaveState = applySaveStateToFiles(diskId, files);
-    const withMoveState = applyMoveStateToFiles(diskId, withSaveState);
-    reconcilePendingWithServer(diskId, parentId, withMoveState);
+    const withDeleteState = applyDeleteStateToFiles(diskId, withSaveState);
+    const withMoveState = applyMoveStateToFiles(diskId, withDeleteState);
+    const withServerPending = applyPendingStateFromEntries(diskId, parentId, withMoveState);
     const pending = getPendingEntries(diskId, parentId);
-    if (!pending.length) return withMoveState;
-    const names = new Set(withMoveState.map((file) => file.name.toLowerCase()));
+    if (!pending.length) return withServerPending;
+    const names = new Set(withServerPending.map((file) => file.name.toLowerCase()));
     const extras = pending
       .filter((entry) => {
         if (names.has(entry.name.toLowerCase())) return false;
@@ -486,7 +754,7 @@ const GithubDisk = (() => {
           || entry.status === 'error';
       })
       .map((entry) => mapPendingFile(diskId, parentId, entry));
-    return [...withMoveState, ...extras].sort((a, b) => {
+    return [...withServerPending, ...extras].sort((a, b) => {
       if (a.isFolder !== b.isFolder) return a.isFolder ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
@@ -495,28 +763,6 @@ const GithubDisk = (() => {
   function buildExpectedPath(parentId, name) {
     const parentPath = normalizePath(parentId);
     return parentPath ? `${parentPath}/${name}` : name;
-  }
-
-  function reconcilePendingWithServer(diskId, parentId, files) {
-    const key = pendingFolderKey(diskId, parentId);
-    const list = pendingByFolder.get(key);
-    if (!list?.length) return;
-
-    const names = new Set(files.map((file) => file.name.toLowerCase()));
-    let changed = false;
-
-    for (let i = list.length - 1; i >= 0; i -= 1) {
-      const entry = list[i];
-      if ((entry.status === 'pending' || entry.status === 'syncing' || entry.status === 'moving') && names.has(entry.name.toLowerCase())) {
-        pendingConfirmTimers.delete(entry.tempId);
-        list.splice(i, 1);
-        changed = true;
-      }
-    }
-
-    if (!list.length) pendingByFolder.delete(key);
-    else pendingByFolder.set(key, list);
-    if (changed) notifyListChange(diskId);
   }
 
   function isPathVisibleInTree(tree, expectedPath, isFolder) {
@@ -747,11 +993,15 @@ const GithubDisk = (() => {
   }
 
   function getAppDirectoryFromLocation() {
+    if (typeof BasePath !== 'undefined') {
+      return BasePath.get();
+    }
+
     const path = location.pathname.replace(/\/+$/, '') || '/';
     if (/\.html$/i.test(path)) {
       return path.slice(0, path.lastIndexOf('/')) || '';
     }
-    return path === '/' ? '' : path;
+    return '';
   }
 
   function getOAuthRedirectUri() {
@@ -1330,9 +1580,35 @@ const GithubDisk = (() => {
     return parts.join(' — ') || `GitHub API error (${status})`;
   }
 
+  function isEmptyGitTreeError(err) {
+    const msg = (err?.message || String(err)).toLowerCase();
+    return /repository is empty/.test(msg)
+      || /git repository is empty/.test(msg)
+      || /no commit found/.test(msg);
+  }
+
   function isRepoNameTakenError(err) {
     const msg = (err?.message || String(err)).toLowerCase();
     return /name already exists|already exists on this account/.test(msg);
+  }
+
+  function isDuplicateNameError(err) {
+    const msg = (err?.message || String(err)).toLowerCase();
+    return /"sha"\s+wasn't supplied|sha wasn't supplied|already exists in this folder|file already exists/i.test(msg);
+  }
+
+  function makeUniqueSiblingName(name, existsFn) {
+    if (!existsFn(name)) return name;
+    const match = name.match(/^(.*?)(\.[^.]+)?$/);
+    const stem = match?.[1] || name;
+    const ext = match?.[2] || '';
+    let candidate = `${stem} (2)${ext}`;
+    let counter = 3;
+    while (existsFn(candidate)) {
+      candidate = `${stem} (${counter})${ext}`;
+      counter += 1;
+    }
+    return candidate;
   }
 
   function isRepoCreatePermissionError(err) {
@@ -1540,13 +1816,22 @@ const GithubDisk = (() => {
     if (!force && repoTreeCache.has(disk.id)) {
       return repoTreeCache.get(disk.id);
     }
-    const data = await apiRequest(
-      `/repos/${encodeURIComponent(disk.owner)}/${encodeURIComponent(disk.repo)}/git/trees/${encodeURIComponent(disk.branch)}?recursive=1`,
-      disk.token
-    );
-    const tree = data.tree || [];
-    repoTreeCache.set(disk.id, tree);
-    return tree;
+    try {
+      const data = await apiRequest(
+        `/repos/${encodeURIComponent(disk.owner)}/${encodeURIComponent(disk.repo)}/git/trees/${encodeURIComponent(disk.branch)}?recursive=1`,
+        disk.token
+      );
+      const tree = data.tree || [];
+      repoTreeCache.set(disk.id, tree);
+      return tree;
+    } catch (err) {
+      // Brand-new repos have no commits yet, so the branch tree does not exist.
+      if (isEmptyGitTreeError(err)) {
+        repoTreeCache.set(disk.id, []);
+        return [];
+      }
+      throw err;
+    }
   }
 
   async function listFiles(diskId, parentId = ROOT_ID) {
@@ -1656,13 +1941,16 @@ const GithubDisk = (() => {
 
     if (res.status === 301 || res.status === 302 || res.status === 303 || res.status === 307 || res.status === 308) {
       const downloadUrl = res.headers.get('location');
-      const tree = await getRepoTree(disk);
+      const tree = await getRepoTree(disk, { force: true });
       const entry = tree.find((e) => e.type === 'blob' && e.path === path);
+      if (!entry?.sha) {
+        throw new Error(`Could not resolve GitHub revision for "${path}"`);
+      }
       return {
         type: 'file',
         name: path.split('/').pop() || path,
         path,
-        sha: entry?.sha || null,
+        sha: entry.sha,
         size: entry?.size ?? null,
         encoding: null,
         content: null,
@@ -1790,13 +2078,39 @@ const GithubDisk = (() => {
     });
   }
 
+  async function replaceFile(diskId, parentId, name, mimeType, content = '') {
+    return runPendingMutation(
+      diskId,
+      parentId,
+      { name, mimeType, size: new TextEncoder().encode(content || '').length },
+      async () => {
+        const disk = getDisk(diskId);
+        if (!disk) throw new Error('GitHub storage not found');
+        const parentPath = normalizePath(parentId);
+        const filePath = parentPath ? `${parentPath}/${name}` : name;
+        const meta = await getFileContentMeta(disk, filePath);
+        if (meta.type === 'dir') throw new Error('Cannot replace a folder with a file');
+        await putFileContent(disk, filePath, content, `Replace file ${filePath}`, meta.sha);
+        invalidateRepoTree(diskId);
+        return {
+          id: filePath,
+          name,
+          mimeType: mimeType || inferMimeType(name),
+          parents: [parentPath || ROOT_ID],
+          parentId: parentPath || ROOT_ID,
+          viewUrl: getFileViewUrl(diskId, filePath),
+        };
+      }
+    );
+  }
+
   async function getTextFileContent(diskId, fileId) {
     const disk = getDisk(diskId);
     if (!disk) throw new Error('GitHub storage not found');
     const path = normalizePath(fileId);
     const meta = await getFileContentMeta(disk, path);
     if (meta.type !== 'file') throw new Error('Item is not a file');
-    if (meta.encoding === 'base64' && meta.content) {
+    if (meta.encoding === 'base64' && typeof meta.content === 'string') {
       return b64DecodeUtf8(meta.content);
     }
     const blob = await downloadFile(diskId, fileId);
@@ -1870,38 +2184,87 @@ const GithubDisk = (() => {
     return putFileBlob(disk, path, blob, message);
   }
 
+  async function collectDeleteBlobPaths(disk, targetPath) {
+    const normalized = normalizePath(targetPath);
+    const tree = await getRepoTree(disk, { force: true });
+    const paths = tree
+      .filter((e) => e.type === 'blob' && (e.path === normalized || e.path.startsWith(`${normalized}/`)))
+      .map((e) => e.path);
+
+    if (paths.length) return [...new Set(paths)];
+
+    try {
+      const meta = await getFileContentMeta(disk, normalized);
+      if (Array.isArray(meta)) {
+        return meta
+          .filter((item) => item?.type === 'file' && item.path)
+          .map((item) => item.path);
+      }
+      if (meta?.type === 'file') return [normalized];
+    } catch (err) {
+      const missing = /404|not found/i.test(err?.message || String(err));
+      if (missing) return [];
+      throw err;
+    }
+
+    return [];
+  }
+
   async function deleteFile(diskId, fileId) {
     const disk = getDisk(diskId);
     if (!disk) throw new Error('GitHub storage not found');
     const targetPath = normalizePath(fileId);
-    const tree = await getRepoTree(disk);
-    const paths = tree
-      .filter((e) => e.type === 'blob' && (e.path === targetPath || e.path.startsWith(`${targetPath}/`)))
-      .map((e) => e.path);
+    const fileName = targetPath.split('/').pop() || targetPath;
+    let isFolder = false;
+    let size = 0;
 
-    if (!paths.length) {
+    try {
+      isFolder = await isGithubFolder(diskId, targetPath);
+    } catch {
+      isFolder = false;
+    }
+
+    try {
       const meta = await getFileContentMeta(disk, targetPath);
-      if (meta.type === 'file') paths.push(targetPath);
+      size = meta.size || 0;
+      if (meta.type === 'dir') isFolder = true;
+    } catch {
+      // Item may already be gone or still syncing.
     }
 
-    for (const path of paths) {
-      const meta = await getFileContentMeta(disk, path);
-      await apiRequest(
-        `/repos/${encodeURIComponent(disk.owner)}/${encodeURIComponent(disk.repo)}/contents/${encodeRepoPath(path)}`,
-        disk.token,
-        {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: `Delete ${path}`,
-            sha: meta.sha,
-            branch: disk.branch,
-          }),
+    await runPendingDelete(diskId, targetPath, {
+      name: fileName,
+      isFolder,
+      size,
+    }, async () => {
+      const paths = await collectDeleteBlobPaths(disk, targetPath);
+      if (!paths.length) {
+        if (await isDeletedOnServer(disk, targetPath, isFolder)) return;
+        throw new Error(isFolder
+          ? 'Nothing to delete in this folder on GitHub'
+          : 'File not found on GitHub');
+      }
+
+      for (const path of paths) {
+        const meta = await getFileContentMeta(disk, path);
+        if (!meta?.sha) {
+          throw new Error(`Could not resolve GitHub revision for "${path}"`);
         }
-      );
-    }
-    invalidateRepoTree(diskId);
-    notifyListChange(diskId);
+        await apiRequest(
+          `/repos/${encodeURIComponent(disk.owner)}/${encodeURIComponent(disk.repo)}/contents/${encodeRepoPath(path)}`,
+          disk.token,
+          {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: `Delete ${path}`,
+              sha: meta.sha,
+              branch: disk.branch,
+            }),
+          }
+        );
+      }
+    });
   }
 
   async function trashFile(diskId, fileId) {
@@ -2071,7 +2434,7 @@ const GithubDisk = (() => {
       throw new Error('Item is not a file');
     }
 
-    if (meta.encoding === 'base64' && meta.content) {
+    if (meta.encoding === 'base64' && typeof meta.content === 'string') {
       return new Blob([b64DecodeBytes(meta.content)], { type: mimeType });
     }
 
@@ -2132,21 +2495,19 @@ const GithubDisk = (() => {
       disk.token
     );
     const usage = (repo.size || 0) * 1024;
-    const limit = RECOMMENDED_REPO_SIZE_BYTES;
+    const limit = MAX_REPO_SIZE_BYTES;
     const available = Math.max(0, limit - usage);
     const usageFormatted = formatSize(usage);
     const limitFormatted = formatSize(limit);
-    const maxLimitFormatted = formatSize(MAX_REPO_SIZE_BYTES);
+    const availableFormatted = formatSize(available);
     return {
       usage,
       limit,
-      maxLimit: MAX_REPO_SIZE_BYTES,
       available,
       usageFormatted,
       limitFormatted,
-      maxLimitFormatted,
-      availableFormatted: formatSize(available),
-      label: `${usageFormatted} used · ${limitFormatted} recommended (GitHub max ${maxLimitFormatted})`,
+      availableFormatted,
+      label: `${usageFormatted} used · ${availableFormatted} free of ${limitFormatted}`,
       shortLabel: `${usageFormatted} / ${limitFormatted}`,
     };
   }
@@ -2176,10 +2537,51 @@ const GithubDisk = (() => {
     if (!disk) throw new Error('GitHub storage not found');
     const parts = segments[1] === 'My Drive' ? segments.slice(2) : segments.slice(1);
     const path = parts.join('/');
-    const files = await listFiles(disk.id, getParentPath(path) || ROOT_ID);
-    const file = files.find((f) => f.name === parts[parts.length - 1]);
-    if (!file) throw new Error('File not found');
-    return { diskId: disk.id, file };
+    const fileName = parts[parts.length - 1];
+    if (!fileName) throw new Error('Invalid file path');
+    const parentPath = getParentPath(path) || ROOT_ID;
+    const files = await listFiles(disk.id, parentPath);
+    const file = files.find((f) => !f.isFolder && f.name === fileName);
+    if (file) return { diskId: disk.id, file };
+
+    const direct = await tryResolveFileByDirectPath(disk, disk.id, path);
+    if (direct) return { diskId: disk.id, file: direct };
+    throw new Error('File not found');
+  }
+
+  async function tryResolveFileByDirectPath(disk, diskId, path) {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        const meta = await getFileContentMeta(disk, path);
+        if (meta.type === 'dir') throw new Error('Item is a folder');
+        const fileName = path.split('/').pop() || path;
+        const parentPath = getParentPath(path);
+        const mimeType = inferMimeType(fileName);
+        return {
+          id: path,
+          name: fileName,
+          isFolder: false,
+          mimeType,
+          parents: [parentPath || ROOT_ID],
+          parentId: parentPath || ROOT_ID,
+          size: meta.size || 0,
+          sizeFormatted: formatSize(meta.size || 0),
+          dateFormatted: '—',
+          typeName: mimeType === 'application/json' ? 'JSON file' : mimeType.startsWith('text/') ? 'Text file' : 'File',
+          viewUrl: getFileViewUrl(diskId, path),
+          webViewLink: getItemWebUrl(diskId, path, false),
+        };
+      } catch (err) {
+        const msg = err?.message || '';
+        const missing = /404|not found/i.test(msg);
+        if (!missing || attempt === 3) {
+          if (missing) return null;
+          throw err;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+      }
+    }
+    return null;
   }
 
   return {
@@ -2213,6 +2615,9 @@ const GithubDisk = (() => {
     createFolder,
     createFile,
     createFileFromBlob,
+    replaceFile,
+    isDuplicateNameError,
+    makeUniqueSiblingName,
     isTextFileMime,
     renameFile,
     trashFile,

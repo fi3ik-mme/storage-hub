@@ -2,7 +2,7 @@
   "name": "Storage Hub",
   "short_name": "Storage Hub",
   "description": "Storage Hub by Mykhailo Mikus — Google Drive, local storage, and GitHub in one file manager.",
-  "start_url": "./",
+  "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0d2137",
   "theme_color": "#0078d4",

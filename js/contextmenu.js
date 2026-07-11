@@ -1011,8 +1011,8 @@ const ContextMenu = (() => {
       ['Display name', disk.accountName || disk.accountLogin || '—'],
       { section: 'Usage' },
       ['Used', quota?.usageFormatted || '—'],
-      ['Recommended limit', quota?.limitFormatted || '—'],
-      ['GitHub maximum', quota?.maxLimitFormatted || '—'],
+      ['Limit', quota?.limitFormatted || '—'],
+      ['Available', quota?.availableFormatted || '—'],
       ['Summary', quota?.label || '—'],
     ];
   }
@@ -1076,122 +1076,153 @@ const ContextMenu = (() => {
     return GithubDisk.createFileFromBlob(destDiskId, parentId, item.name, item.mimeType, blob);
   }
 
+  function storageKind(userId) {
+    if (GithubDisk.isGithubId(userId)) return 'github';
+    if (LocalDisk.isLocalId(userId)) return 'local';
+    return 'google';
+  }
+
   async function transferItems(items, sourceUserId, sourceParentId, destUserId, destParentId, mode = 'cut') {
     const crossDrive = sourceUserId !== destUserId;
     const sourceLocal = LocalDisk.isLocalId(sourceUserId);
     const destLocal = LocalDisk.isLocalId(destUserId);
     const sourceGithub = GithubDisk.isGithubId(sourceUserId);
     const destGithub = GithubDisk.isGithubId(destUserId);
+    const transferIds = items.map((item) => item.id);
+    const progressIds = items.map((item) => `transfer:${item.id}`);
+    const operationKey = typeof OperationProgress !== 'undefined'
+      ? OperationProgress.crossKey(storageKind(sourceUserId), storageKind(destUserId), mode)
+      : null;
 
-    if (sourceGithub && destGithub) {
-      for (const item of items) {
-        if (crossDrive || mode === 'copy') {
-          if (crossDrive) {
-            await copyGithubItemToGithub(sourceUserId, destUserId, item, destParentId);
-          } else {
-            await GithubDisk.copyFile(destUserId, item.id, destParentId);
-          }
-        } else {
-          const fromParent = sourceParentId || item.parents?.[0] || item.parentId || GithubDisk.ROOT_ID;
-          await GithubDisk.moveFile(destUserId, item.id, fromParent, destParentId);
-        }
-        if (mode === 'cut' && crossDrive) {
-          await GithubDisk.deleteFile(sourceUserId, item.id);
-        }
-      }
-      app.clearTreeCache?.(destUserId);
-      if (mode === 'cut') app.clearTreeCache?.(sourceUserId);
-      await app.refresh();
-      return;
+    if (operationKey) {
+      items.forEach((item) => {
+        OperationProgress.start(`transfer:${item.id}`, operationKey, { size: item.size || 0 });
+      });
+      app.markItemsProcessing?.(transferIds);
     }
 
-    if (destGithub && crossDrive) {
-      for (const item of items) {
-        if (sourceLocal) {
-          await copyLocalItemToGithub(sourceUserId, destUserId, item, destParentId);
-        } else if (!sourceGithub) {
-          const sourceToken = await Auth.ensureValidToken(sourceUserId);
-          await copyGoogleItemToGithub(sourceToken, destUserId, item, destParentId);
+    let transferSuccess = true;
+    try {
+      if (sourceGithub && destGithub) {
+        for (const item of items) {
+          if (crossDrive || mode === 'copy') {
+            if (crossDrive) {
+              await copyGithubItemToGithub(sourceUserId, destUserId, item, destParentId);
+            } else {
+              await GithubDisk.copyFile(destUserId, item.id, destParentId);
+            }
+          } else {
+            const fromParent = sourceParentId || item.parents?.[0] || item.parentId || GithubDisk.ROOT_ID;
+            await GithubDisk.moveFile(destUserId, item.id, fromParent, destParentId);
+          }
+          if (mode === 'cut' && crossDrive) {
+            await GithubDisk.deleteFile(sourceUserId, item.id);
+          }
         }
+        app.clearTreeCache?.(destUserId);
+        if (mode === 'cut') app.clearTreeCache?.(sourceUserId);
+        await app.refresh();
+        return;
+      }
 
-        if (mode === 'cut') {
+      if (destGithub && crossDrive) {
+        for (const item of items) {
           if (sourceLocal) {
-            await LocalDisk.deleteFile(sourceUserId, item.id);
+            await copyLocalItemToGithub(sourceUserId, destUserId, item, destParentId);
           } else if (!sourceGithub) {
             const sourceToken = await Auth.ensureValidToken(sourceUserId);
-            await Drive.trashFile(sourceToken, item.id);
+            await copyGoogleItemToGithub(sourceToken, destUserId, item, destParentId);
+          }
+
+          if (mode === 'cut') {
+            if (sourceLocal) {
+              await LocalDisk.deleteFile(sourceUserId, item.id);
+            } else if (!sourceGithub) {
+              const sourceToken = await Auth.ensureValidToken(sourceUserId);
+              await Drive.trashFile(sourceToken, item.id);
+            }
           }
         }
+        app.clearTreeCache?.(destUserId);
+        if (mode === 'cut') app.clearTreeCache?.(sourceUserId);
+        await app.refresh();
+        return;
       }
-      app.clearTreeCache?.(destUserId);
-      if (mode === 'cut') app.clearTreeCache?.(sourceUserId);
-      await app.refresh();
-      return;
-    }
 
-    if (sourceGithub && crossDrive) {
+      if (sourceGithub && crossDrive) {
+        for (const item of items) {
+          if (destLocal) {
+            await copyGithubItemToLocal(sourceUserId, destUserId, item, destParentId);
+          } else if (!destGithub) {
+            const destToken = await Auth.ensureValidToken(destUserId);
+            await copyGithubItemToGoogle(sourceUserId, destToken, item, destParentId);
+          }
+          if (mode === 'cut') {
+            await GithubDisk.deleteFile(sourceUserId, item.id);
+          }
+        }
+        app.clearTreeCache?.(destUserId);
+        app.clearTreeCache?.(sourceUserId);
+        await app.refresh();
+        return;
+      }
+
       for (const item of items) {
-        if (destLocal) {
-          await copyGithubItemToLocal(sourceUserId, destUserId, item, destParentId);
-        } else if (!destGithub) {
+        if (sourceLocal && destLocal) {
+          if (crossDrive) {
+            await copyLocalItemToDisk(sourceUserId, destUserId, item, destParentId);
+            if (mode === 'cut') {
+              await LocalDisk.deleteFile(sourceUserId, item.id);
+            }
+          } else if (mode === 'copy') {
+            await LocalDisk.copyFile(destUserId, item.id, destParentId);
+          } else {
+            const fromParent = sourceParentId || item.parents?.[0] || item.parentId;
+            await LocalDisk.moveFile(destUserId, item.id, fromParent, destParentId);
+          }
+        } else if (!sourceLocal && !destLocal) {
           const destToken = await Auth.ensureValidToken(destUserId);
-          await copyGithubItemToGoogle(sourceUserId, destToken, item, destParentId);
-        }
-        if (mode === 'cut') {
-          await GithubDisk.deleteFile(sourceUserId, item.id);
-        }
-      }
-      app.clearTreeCache?.(destUserId);
-      app.clearTreeCache?.(sourceUserId);
-      await app.refresh();
-      return;
-    }
-
-    for (const item of items) {
-      if (sourceLocal && destLocal) {
-        if (crossDrive) {
-          await copyLocalItemToDisk(sourceUserId, destUserId, item, destParentId);
+          const sourceToken = crossDrive ? await Auth.ensureValidToken(sourceUserId) : destToken;
+          if (crossDrive) {
+            await Drive.copyItemToUser(sourceToken, destToken, item.id, destParentId, item);
+            if (mode === 'cut') {
+              await Drive.trashFile(sourceToken, item.id);
+            }
+          } else if (mode === 'copy') {
+            await Drive.copyFile(destToken, item.id, destParentId);
+          } else {
+            const fromParent = sourceParentId || item.parents?.[0];
+            await Drive.moveFile(destToken, item.id, fromParent, destParentId);
+          }
+        } else if (!sourceLocal && destLocal) {
+          const sourceToken = await Auth.ensureValidToken(sourceUserId);
+          await copyGoogleItemToLocal(sourceToken, destUserId, item, destParentId);
+          if (mode === 'cut') {
+            await Drive.trashFile(sourceToken, item.id);
+          }
+        } else {
+          const destToken = await Auth.ensureValidToken(destUserId);
+          await copyLocalItemToGoogle(sourceUserId, destToken, item, destParentId);
           if (mode === 'cut') {
             await LocalDisk.deleteFile(sourceUserId, item.id);
           }
-        } else if (mode === 'copy') {
-          await LocalDisk.copyFile(destUserId, item.id, destParentId);
-        } else {
-          const fromParent = sourceParentId || item.parents?.[0] || item.parentId;
-          await LocalDisk.moveFile(destUserId, item.id, fromParent, destParentId);
-        }
-      } else if (!sourceLocal && !destLocal) {
-        const destToken = await Auth.ensureValidToken(destUserId);
-        const sourceToken = crossDrive ? await Auth.ensureValidToken(sourceUserId) : destToken;
-        if (crossDrive) {
-          await Drive.copyItemToUser(sourceToken, destToken, item.id, destParentId, item);
-          if (mode === 'cut') {
-            await Drive.trashFile(sourceToken, item.id);
-          }
-        } else if (mode === 'copy') {
-          await Drive.copyFile(destToken, item.id, destParentId);
-        } else {
-          const fromParent = sourceParentId || item.parents?.[0];
-          await Drive.moveFile(destToken, item.id, fromParent, destParentId);
-        }
-      } else if (!sourceLocal && destLocal) {
-        const sourceToken = await Auth.ensureValidToken(sourceUserId);
-        await copyGoogleItemToLocal(sourceToken, destUserId, item, destParentId);
-        if (mode === 'cut') {
-          await Drive.trashFile(sourceToken, item.id);
-        }
-      } else {
-        const destToken = await Auth.ensureValidToken(destUserId);
-        await copyLocalItemToGoogle(sourceUserId, destToken, item, destParentId);
-        if (mode === 'cut') {
-          await LocalDisk.deleteFile(sourceUserId, item.id);
         }
       }
-    }
 
-    app.clearTreeCache?.(destUserId);
-    if (crossDrive) app.clearTreeCache?.(sourceUserId);
-    await app.refresh();
+      app.clearTreeCache?.(destUserId);
+      if (crossDrive) app.clearTreeCache?.(sourceUserId);
+      await app.refresh();
+    } catch (err) {
+      transferSuccess = false;
+      throw err;
+    } finally {
+      if (operationKey) {
+        progressIds.forEach((id) => {
+          OperationProgress.finish(id, transferSuccess);
+        });
+        app.unmarkItemsProcessing?.(transferIds);
+      }
+    }
   }
 
   async function pasteItems(ctx) {
@@ -1284,21 +1315,95 @@ const ContextMenu = (() => {
     return copyBlobToGithub(destDiskId, parentId, exported.name, exported.mimeType, exported.blob);
   }
 
+  function makeUniqueSiblingName(name, existsFn) {
+    if (typeof GithubDisk !== 'undefined' && typeof GithubDisk.makeUniqueSiblingName === 'function') {
+      return GithubDisk.makeUniqueSiblingName(name, existsFn);
+    }
+    if (!existsFn(name)) return name;
+    const match = name.match(/^(.*?)(\.[^.]+)?$/);
+    const stem = match?.[1] || name;
+    const ext = match?.[2] || '';
+    let candidate = `${stem} (2)${ext}`;
+    let counter = 3;
+    while (existsFn(candidate)) {
+      candidate = `${stem} (${counter})${ext}`;
+      counter += 1;
+    }
+    return candidate;
+  }
+
+  async function resolveCreateName(ctx, name, isFolder) {
+    const driveId = getDriveId(ctx);
+    const parentId = targetParentId(ctx);
+
+    async function getSiblings() {
+      if (isLocalCtx(ctx)) return LocalDisk.listFiles(driveId, parentId);
+      if (isGithubCtx(ctx)) return GithubDisk.listFiles(driveId, parentId);
+      return [];
+    }
+
+    let currentName = name;
+    while (true) {
+      const siblings = await getSiblings();
+      const existsFn = (candidate) =>
+        siblings.some((item) => item.name.toLowerCase() === candidate.toLowerCase());
+
+      if (!isLocalCtx(ctx) && !isGithubCtx(ctx)) {
+        return { mode: 'create', name: currentName };
+      }
+
+      if (!existsFn(currentName)) {
+        return { mode: 'create', name: currentName };
+      }
+
+      const resolution = await Dialog.resolveNameConflict({
+        name: currentName,
+        isFolder,
+        allowReplace: !isFolder,
+        suggestAlternative: () => makeUniqueSiblingName(currentName, existsFn),
+      });
+      if (!resolution) return null;
+      if (resolution.action === 'replace') {
+        return { mode: 'replace', name: currentName };
+      }
+      currentName = resolution.name;
+    }
+  }
+
   async function createFolder(ctx) {
     const driveId = getDriveId(ctx);
     const name = await Dialog.prompt('New folder name:', '', { title: 'New folder' });
     if (!name?.trim()) return;
-    if (isLocalCtx(ctx)) {
-      await LocalDisk.createFolder(driveId, targetParentId(ctx), name.trim());
-    } else if (isGithubCtx(ctx)) {
-      await GithubDisk.createFolder(driveId, targetParentId(ctx), name.trim());
-    } else {
-      const token = await getToken(ctx);
-      await Drive.createFolder(token, targetParentId(ctx), name.trim());
+
+    const resolved = await resolveCreateName(ctx, name.trim(), true);
+    if (!resolved) return;
+
+    if (resolved.mode === 'replace') {
+      app.showStatus(`Folder "${resolved.name}" already exists`);
+      await app.refresh();
+      return;
+    }
+
+    const parentId = targetParentId(ctx);
+    try {
+      if (isLocalCtx(ctx)) {
+        await LocalDisk.createFolder(driveId, parentId, resolved.name);
+      } else if (isGithubCtx(ctx)) {
+        await GithubDisk.createFolder(driveId, parentId, resolved.name);
+      } else {
+        const token = await getToken(ctx);
+        await Drive.createFolder(token, parentId, resolved.name);
+      }
+    } catch (err) {
+      if (isGithubCtx(ctx) && GithubDisk.isDuplicateNameError(err)) {
+        app.showError(`A folder named "${resolved.name}" already exists in this location.`);
+        return;
+      }
+      throw err;
     }
     app.clearTreeCache?.(driveId);
     await app.refresh();
-    app.showStatus(`Created folder "${name.trim()}"`);
+    app.showStatus(`Created folder "${resolved.name}"`);
   }
 
   async function createNewFile(fileType, ctx) {
@@ -1310,47 +1415,52 @@ const ContextMenu = (() => {
     if (!name?.trim()) return;
     name = name.trim();
 
+    if (type.ext && !name.toLowerCase().endsWith(type.ext)) name += type.ext;
+
+    const resolved = await resolveCreateName(ctx, name, false);
+    if (!resolved) return;
+    name = resolved.name;
+
     const parentId = targetParentId(ctx);
-    let created;
 
     if (isLocalCtx(ctx)) {
-      if (type.ext && !name.toLowerCase().endsWith(type.ext)) name += type.ext;
-      created = await LocalDisk.createFile(driveId, parentId, name, type.mimeType, type.content);
+      if (resolved.mode === 'replace') {
+        await LocalDisk.replaceFile(driveId, parentId, name, type.mimeType, type.content);
+      } else {
+        await LocalDisk.createFile(driveId, parentId, name, type.mimeType, type.content);
+      }
       app.clearTreeCache?.(driveId);
       await app.refresh();
-      app.showStatus(`Created "${name}"`);
-      if (LocalDisk.isNotepadFile(created)) {
-        try {
-          await Notepad.openInTab(created, driveId);
-        } catch (err) {
-          app.showError(err.message);
-        }
-      }
+      app.showStatus(resolved.mode === 'replace' ? `Replaced "${name}"` : `Created "${name}"`);
       return;
     }
 
     if (isGithubCtx(ctx)) {
-      if (type.ext && !name.toLowerCase().endsWith(type.ext)) name += type.ext;
       if (type.mimeType.startsWith('application/vnd.google-apps.')) {
         throw new Error('Google Workspace files are not supported in GitHub storage');
       }
-      created = await GithubDisk.createFile(driveId, parentId, name, type.mimeType, type.content);
+      try {
+        if (resolved.mode === 'replace') {
+          await GithubDisk.replaceFile(driveId, parentId, name, type.mimeType, type.content);
+        } else {
+          await GithubDisk.createFile(driveId, parentId, name, type.mimeType, type.content);
+        }
+      } catch (err) {
+        if (GithubDisk.isDuplicateNameError(err)) {
+          app.showError(`A file named "${name}" already exists in this location.`);
+          return;
+        }
+        throw err;
+      }
       app.clearTreeCache?.(driveId);
       await app.refresh();
-      app.showStatus(`Created "${name}"`);
-      if (GithubDisk.isNotepadFile(created)) {
-        try {
-          await Notepad.openInTab(created, driveId);
-        } catch (err) {
-          app.showError(err.message);
-        }
-      }
+      app.showStatus(resolved.mode === 'replace' ? `Replaced "${name}"` : `Created "${name}"`);
       return;
     }
 
     const token = await getToken(ctx);
     if (type.mimeType.startsWith('application/vnd.google-apps.')) {
-      created = await Drive.createGoogleApp(token, parentId, name, type.mimeType);
+      const created = await Drive.createGoogleApp(token, parentId, name, type.mimeType);
       app.clearTreeCache?.(driveId);
       await app.refresh();
       app.showStatus(`Created "${name}"`);
@@ -1358,19 +1468,10 @@ const ContextMenu = (() => {
       return;
     }
 
-    if (type.ext && !name.toLowerCase().endsWith(type.ext)) name += type.ext;
-    created = await Drive.createFile(token, parentId, name, type.mimeType, type.content);
+    await Drive.createFile(token, parentId, name, type.mimeType, type.content);
     app.clearTreeCache?.(driveId);
     await app.refresh();
     app.showStatus(`Created "${name}"`);
-
-    if (Drive.isNotepadFile(created)) {
-      try {
-        await Notepad.openInTab(created, driveId);
-      } catch (err) {
-        app.showError(err.message);
-      }
-    }
   }
 
   async function renameItem(ctx) {
@@ -1391,6 +1492,18 @@ const ContextMenu = (() => {
     app.showStatus(`Renamed to "${name.trim()}"`);
   }
 
+  function beginDeleteProgress(file) {
+    if (!file?.id) return;
+    if (typeof OperationProgress !== 'undefined') {
+      OperationProgress.start(
+        file.id,
+        OperationProgress.key('github', 'delete'),
+        { size: file.size || 0 }
+      );
+    }
+    app.markItemsProcessing?.([file.id]);
+  }
+
   async function trashItem(ctx) {
     const driveId = getDriveId(ctx);
     const file = ctx.file;
@@ -1398,17 +1511,24 @@ const ContextMenu = (() => {
       `Move "${file.name}" to Recycle Bin?`,
       { title: 'Move to Recycle Bin', confirmLabel: 'Move to Recycle Bin', danger: true }
     )) return;
-    if (isLocalCtx(ctx)) {
-      await LocalDisk.trashFile(driveId, file.id);
-    } else if (isGithubCtx(ctx)) {
-      await GithubDisk.trashFile(driveId, file.id);
-    } else {
-      const token = await getToken(ctx);
-      await Drive.trashFile(token, file.id);
+    if (isGithubCtx(ctx)) beginDeleteProgress(file);
+    try {
+      if (isLocalCtx(ctx)) {
+        await LocalDisk.trashFile(driveId, file.id);
+      } else if (isGithubCtx(ctx)) {
+        await GithubDisk.trashFile(driveId, file.id);
+      } else {
+        const token = await getToken(ctx);
+        await Drive.trashFile(token, file.id);
+      }
+      app.clearTreeCache?.(driveId);
+      await app.refresh();
+      app.showStatus(`Moved "${file.name}" to Recycle Bin`);
+    } catch (err) {
+      app.showError(err.message);
+    } finally {
+      if (isGithubCtx(ctx)) app.unmarkItemsProcessing?.([file.id]);
     }
-    app.clearTreeCache?.(driveId);
-    await app.refresh();
-    app.showStatus(`Moved "${file.name}" to Recycle Bin`);
   }
 
   async function restoreItem(ctx) {
@@ -1433,16 +1553,23 @@ const ContextMenu = (() => {
       `Permanently delete "${file.name}"? This cannot be undone.`,
       { title: 'Delete permanently', confirmLabel: 'Delete', danger: true }
     )) return;
-    if (isLocalCtx(ctx)) {
-      await LocalDisk.deleteFile(driveId, file.id);
-    } else if (isGithubCtx(ctx)) {
-      await GithubDisk.deleteFile(driveId, file.id);
-    } else {
-      const token = await getToken(ctx);
-      await Drive.deleteFile(token, file.id);
+    if (isGithubCtx(ctx)) beginDeleteProgress(file);
+    try {
+      if (isLocalCtx(ctx)) {
+        await LocalDisk.deleteFile(driveId, file.id);
+      } else if (isGithubCtx(ctx)) {
+        await GithubDisk.deleteFile(driveId, file.id);
+      } else {
+        const token = await getToken(ctx);
+        await Drive.deleteFile(token, file.id);
+      }
+      await app.refresh();
+      app.showStatus(`Deleted "${file.name}" permanently`);
+    } catch (err) {
+      app.showError(err.message);
+    } finally {
+      if (isGithubCtx(ctx)) app.unmarkItemsProcessing?.([file.id]);
     }
-    await app.refresh();
-    app.showStatus(`Deleted "${file.name}" permanently`);
   }
 
   async function downloadFile(ctx) {

@@ -324,5 +324,46 @@ const Dialog = (() => {
     );
   }
 
-  return { init, alert, confirm, prompt, form, choose };
+  function resolveNameConflict({ name, isFolder = false, allowReplace = true, suggestAlternative }) {
+    return runExclusive(async () => {
+      const kind = isFolder ? 'folder' : 'file';
+      const choice = await show({
+        type: 'choose',
+        title: isFolder ? 'Folder already exists' : 'File already exists',
+        message: `A ${kind} named "${name}" already exists in this location.`,
+        buttons: [
+          ...(allowReplace && !isFolder
+            ? [{ id: 'replace', label: 'Replace existing', primary: true }]
+            : []),
+          { id: 'rename', label: 'Choose another name', primary: isFolder },
+          { id: 'alternative', label: 'Use alternative name' },
+          { id: 'cancel', label: 'Cancel' },
+        ],
+      });
+
+      if (!choice || choice === 'cancel') return null;
+      if (choice === 'replace') return { action: 'replace' };
+      if (choice === 'alternative') {
+        const alt = typeof suggestAlternative === 'function'
+          ? suggestAlternative()
+          : `${name} (2)`;
+        return { action: 'create', name: alt };
+      }
+      if (choice === 'rename') {
+        const renamed = await show({
+          type: 'prompt',
+          title: isFolder ? 'New folder' : 'New file',
+          label: 'Name:',
+          defaultValue: name,
+          submitLabel: 'Create',
+          cancelLabel: 'Cancel',
+        });
+        const trimmed = renamed?.trim();
+        return trimmed ? { action: 'create', name: trimmed } : null;
+      }
+      return null;
+    });
+  }
+
+  return { init, alert, confirm, prompt, form, choose, resolveNameConflict };
 })();

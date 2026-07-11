@@ -5,44 +5,83 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#0078d4">
   <meta name="google-site-verification" content="eNqApo7Us9h2GKVx8_t4RmmMv1CDldejNsnmMH7RjQ8">
+  <script>
+    (function () {
+      if (/\/notepad\.html\/+$/.test(location.pathname)) {
+        location.replace(
+          location.pathname.replace(/\/notepad\.html\/+$/, '/notepad.html')
+          + location.search
+          + location.hash
+        );
+        return;
+      }
+
+      const APP_ROOT_KEY = 'storage_hub_app_root';
+      const DEPLOY_BASE = '/storage-hub';
+
+      function looksLikeDriveRouteSegment(segment) {
+        return segment.includes('@') || (segment.includes('.') && !segment.includes(' '));
+      }
+
+      function isPlausibleStoredRoot(stored, pathname) {
+        if (!stored) return true;
+        if (stored === DEPLOY_BASE) {
+          return pathname === DEPLOY_BASE || pathname.startsWith(`${DEPLOY_BASE}/`)
+            || /\.github\.io$/i.test(location.hostname);
+        }
+        const parts = pathname.replace(/\/$/, '').split('/').filter(Boolean);
+        if (parts.length >= 2 && `/${parts[0]}` === stored && !looksLikeDriveRouteSegment(parts[1])) {
+          return false;
+        }
+        const bare = pathname.replace(/\/+$/, '') || '/';
+        if (bare === '/' || bare === stored) return true;
+        return pathname === stored || pathname.startsWith(`${stored}/`);
+      }
+
+      function detectRoot(pathname) {
+        if (DEPLOY_BASE && (pathname === DEPLOY_BASE || pathname.startsWith(`${DEPLOY_BASE}/`))) {
+          return DEPLOY_BASE;
+        }
+        if (pathname.endsWith('/index.html')) {
+          return pathname.slice(0, -'/index.html'.length).replace(/\/$/, '');
+        }
+        if (pathname.endsWith('/notepad.html') || /\/notepad\.html\/+$/.test(pathname)) {
+          return pathname.replace(/\/notepad\.html\/?$/, '').replace(/\/$/, '');
+        }
+        try {
+          const stored = sessionStorage.getItem(APP_ROOT_KEY);
+          if (stored !== null && isPlausibleStoredRoot(stored, pathname)) {
+            return stored;
+          }
+        } catch (_) {}
+        const parts = pathname.replace(/\/$/, '').split('/').filter(Boolean);
+        if (!parts.length) return '';
+        if (looksLikeDriveRouteSegment(parts[0])) return '';
+        if (parts.length >= 2 && looksLikeDriveRouteSegment(parts[1])) {
+          return `/${parts[0]}`;
+        }
+        return '';
+      }
+
+      const root = detectRoot(location.pathname);
+      const href = root ? `${root}/` : '/';
+      if (!document.querySelector('base[data-storage-hub-root]')) {
+        const base = document.createElement('base');
+        base.href = href;
+        base.setAttribute('data-storage-hub-root', '1');
+        document.head.appendChild(base);
+      }
+    })();
+  </script>
   <script src="js/site-config.js"></script>
   <script src="js/config.js"></script>
   <script src="js/base-path.js"></script>
   <script src="js/app-version.js"></script>
+  <script>BasePath.bootstrapHeadAssets();</script>
   <title>Notepad — Storage Hub</title>
   <link id="notepad-favicon-32" rel="icon" href="assets/favicon-32.png" sizes="32x32" type="image/png">
   <link id="notepad-favicon-svg" rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link id="notepad-manifest" rel="manifest" href="manifest.webmanifest">
-  <link id="notepad-styles" rel="stylesheet" href="css/style.css">
-  <script>
-    (function () {
-      const version = typeof APP_VERSION !== 'undefined' ? `?v=${APP_VERSION}` : '';
-      const base = typeof BasePath !== 'undefined' ? BasePath.get() : '';
-      const onBase =
-        base &&
-        (location.pathname === base || location.pathname.startsWith(`${base}/`));
-      const prefix = onBase ? `${base}/` : '';
-
-      const map = {
-        'notepad-styles': `css/style.css${version}`,
-        'notepad-favicon-32': 'assets/favicon-32.png',
-        'notepad-favicon-svg': 'assets/favicon.svg',
-        'notepad-manifest': 'manifest.webmanifest',
-      };
-      Object.entries(map).forEach(([id, path]) => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        const href = el.getAttribute('href') || '';
-        if (href.startsWith('/') || /^https?:/i.test(href)) {
-          if (id === 'notepad-styles' && version && !href.includes('?v=')) {
-            el.href = href + version;
-          }
-          return;
-        }
-        el.href = (typeof BasePath !== 'undefined' ? BasePath.prefixRelativeAsset(path) : prefix + path);
-      });
-    })();
-  </script>
 </head>
 <body class="notepad-page">
   <div id="notepad-app" class="notepad-shell">

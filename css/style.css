@@ -773,14 +773,25 @@ body {
 
 .file-item--pending-syncing,
 .file-item--pending-saving,
-.file-item--pending-moving {
+.file-item--pending-moving,
+.file-item--pending-kind-delete.file-item--pending-syncing {
   border-color: #f5d66b;
   background: #fffbe6;
+}
+
+.file-item--pending-kind-delete.file-item--pending-syncing {
+  border-color: #f4a4a4;
+  background: #fff5f5;
 }
 
 .file-item--pending-pending {
   border-color: #99c2ff;
   background: #eef5ff;
+}
+
+.file-item--pending-kind-delete.file-item--pending-pending {
+  border-color: #f4a4a4;
+  background: #fff5f5;
 }
 
 .file-item--pending-error {
@@ -802,6 +813,11 @@ body {
   color: #9a6700;
 }
 
+.file-item--pending-kind-delete .file-pending-badge--syncing,
+.file-item--pending-kind-delete .file-pending-badge--pending {
+  color: #b42318;
+}
+
 .file-pending-badge--pending {
   color: #175cd3;
 }
@@ -814,6 +830,11 @@ body {
 .list-row.file-item--pending-saving,
 .list-row.file-item--pending-moving {
   background: #fffbe6;
+}
+
+.list-row.file-item--pending-kind-delete.file-item--pending-syncing,
+.list-row.file-item--pending-kind-delete.file-item--pending-pending {
+  background: #fff5f5;
 }
 
 .list-row.file-item--pending-pending {
@@ -844,6 +865,88 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+}
+
+.file-icon .file-icon-shell {
+  width: 100%;
+  height: 100%;
+}
+
+.file-icon-shell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.file-icon-shell__content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.file-icon-progress {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  bottom: 0;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.file-icon-shell.file-icon-wrap--small .file-icon-progress,
+.file-icon-shell.file-icon-wrap--tiny .file-icon-progress {
+  height: 3px;
+  left: 0;
+  right: 0;
+}
+
+.file-icon-progress__bar {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0078d4, #00a2ed);
+  transition: width 0.2s linear;
+}
+
+.file-item--pending-syncing .file-icon-progress__bar,
+.file-item--pending-saving .file-icon-progress__bar,
+.file-item--pending-moving .file-icon-progress__bar {
+  background: linear-gradient(90deg, #b78103, #f5d66b);
+}
+
+.file-item--pending-pending .file-icon-progress__bar {
+  background: linear-gradient(90deg, #175cd3, #84caff);
+}
+
+.file-item--pending-kind-delete .file-icon-progress {
+  height: 5px;
+  background: rgba(180, 35, 24, 0.16);
+}
+
+.file-item--pending-kind-delete .file-icon-progress__bar {
+  min-width: 14%;
+  background: linear-gradient(90deg, #b42318, #f97066);
+}
+
+.file-item--pending-kind-delete.file-item--pending-pending .file-icon-progress__bar {
+  background: linear-gradient(90deg, #912018, #fda29b);
+}
+
+.list-icon .file-icon-shell {
+  width: 20px;
+  height: 20px;
+}
+
+.sidebar-icon .file-icon-shell {
+  width: 18px;
+  height: 18px;
 }
 
 .file-icon-wrap {
